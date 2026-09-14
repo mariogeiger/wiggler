@@ -24,8 +24,6 @@ struct ContentView: View {
 
                 pointsOverlay
                     .allowsHitTesting(false)
-                markerOverlay
-                    .allowsHitTesting(false)
 
                 // Everything lives at the top so the hand turning the object never covers a control.
                 VStack(spacing: 10) {
@@ -74,17 +72,6 @@ struct ContentView: View {
                 let r: CGFloat = 2.5
                 ctx.fill(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: 2 * r, height: 2 * r)), with: .color(color))
             }
-        }
-    }
-
-    private var markerOverlay: some View {
-        Canvas { ctx, _ in
-            guard let m = controller.markerImagePoint else { return }
-            let c = controller.viewPoint(imageX: m.x, imageY: m.y)
-            var cross = Path()
-            cross.move(to: CGPoint(x: c.x - 12, y: c.y)); cross.addLine(to: CGPoint(x: c.x + 12, y: c.y))
-            cross.move(to: CGPoint(x: c.x, y: c.y - 12)); cross.addLine(to: CGPoint(x: c.x, y: c.y + 12))
-            ctx.stroke(cross, with: .color(.cyan), lineWidth: 2)
         }
     }
 

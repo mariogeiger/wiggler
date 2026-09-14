@@ -38,8 +38,8 @@ an occlusion or a stale library to test those two key behaviors.
 
 1. Mount the phone in portrait orientation with the object in view.
 2. Move the object: its region and tracking points are selected automatically, without tapping the screen.
-   A cross marks the detected region. The engine also explores the rest of the image; points that become
-   stationary are replaced by moving points. When everything stops, existing tracks are preserved.
+   The engine also explores the rest of the image; points that become stationary are replaced by moving
+   points. When everything stops, existing tracks are preserved.
    If another region becomes active while the first stops, calibration restarts on the new region.
 3. Rotate the object. In the calibrating state, the app collects 3D chords until it finds a well-conditioned
    axis, then waits for a full turn. The axis is red while uncertain and green after fresh, consistent

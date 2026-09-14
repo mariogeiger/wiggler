@@ -10,9 +10,6 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
 
     /// Latest engine output for the overlays (published at ~30 Hz).
     @Published private(set) var output = EngineOutput()
-    /// Marker in engine image coordinates (pixels of the 480x360 landscape image), nil while the engine is idle.
-    /// Placed by the engine itself on the moving textured region.
-    @Published private(set) var markerImagePoint: CGPoint?
     /// Number of tracked points the engine aims for. Persisted across launches.
     @Published private(set) var targetTrackCount = EngineConfig().targetTrackCount {
         didSet { UserDefaults.standard.set(targetTrackCount, forKey: Self.trackCountKey) }
@@ -209,7 +206,6 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
                 DispatchQueue.main.async { [weak self] in
                     self?.output = out
                     self?.harmonicProgress = progress
-                    self?.markerImagePoint = out.marker.map { CGPoint(x: CGFloat($0.x), y: CGFloat($0.y)) }
                     self?.recorderStatus = status
                 }
             }
