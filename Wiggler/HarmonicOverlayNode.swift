@@ -24,9 +24,9 @@ final class HarmonicOverlayNode: SCNNode {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     /// Render thread. The display transform maps top-left-origin image coordinates to view coordinates.
-    func update(image: CGImage?, displayTransform: CGAffineTransform, view: SCNView) {
-        let viewport = view.bounds
-        guard let image, view.pointOfView != nil, viewport.width > 0, viewport.height > 0 else {
+    func update(image: CGImage?, displayTransform: CGAffineTransform, viewportSize: CGSize,
+                renderer: SCNSceneRenderer) {
+        guard let image, renderer.pointOfView != nil, viewportSize.width > 0, viewportSize.height > 0 else {
             isHidden = true
             self.image = nil
             material.diffuse.contents = nil
@@ -38,8 +38,8 @@ final class HarmonicOverlayNode: SCNNode {
             material.diffuse.contents = image
         }
         let vertices = corners.map { p in
-            view.unprojectPoint(SCNVector3(Float(viewport.minX + p.x * viewport.width),
-                                              Float(viewport.minY + p.y * viewport.height), 0.01))
+            renderer.unprojectPoint(SCNVector3(Float(p.x * viewportSize.width),
+                                              Float(p.y * viewportSize.height), 0.01))
         }
         // SceneKit's image texture coordinates, like UIKit's view coordinates, start at the top left.
         let inverse = displayTransform.inverted()

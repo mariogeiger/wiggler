@@ -234,8 +234,9 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
         let out = latestOutput
         let image = latestHarmonicImage
         let transform = latestDisplayTransform
+        let size = viewportSize
         lock.unlock()
-        harmonicOverlay.update(image: image, displayTransform: transform, view: sceneView)
+        harmonicOverlay.update(image: image, displayTransform: transform, viewportSize: size, renderer: renderer)
         overlay.update(with: out, hideRay: image != nil)
     }
 }
