@@ -12,8 +12,12 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
     @Published private(set) var output = EngineOutput()
     /// Marker in engine image coordinates (pixels of the 480x360 landscape image), nil when not placed.
     @Published private(set) var markerImagePoint: CGPoint?
-    /// Number of tracked points the engine aims for.
-    @Published private(set) var targetTrackCount = 160
+    /// Number of tracked points the engine aims for. Persisted across launches.
+    @Published private(set) var targetTrackCount = EngineConfig().targetTrackCount {
+        didSet { UserDefaults.standard.set(targetTrackCount, forKey: Self.trackCountKey) }
+    }
+    private static let trackCountKey = "targetTrackCount"
+    private static let trackCountRange = 20...400
     @Published private(set) var recorderStatus = SessionRecorder.Status(recording: false, seconds: 0, megabytes: 0, frames: 0, fileName: "")
     /// Set when a recording stops: the view presents the export sheet for it.
     @Published var pendingShare: ShareItem?
@@ -55,6 +59,13 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
         sceneView.preferredFramesPerSecond = 60
         sceneView.scene.rootNode.addChildNode(overlay)
         overlay.isHidden = true
+        let saved = UserDefaults.standard.integer(forKey: Self.trackCountKey)
+        if saved != 0 { targetTrackCount = Self.clampTrackCount(saved) }
+        engine.config.targetTrackCount = targetTrackCount
+    }
+
+    private static func clampTrackCount(_ n: Int) -> Int {
+        max(trackCountRange.lowerBound, min(trackCountRange.upperBound, n))
     }
 
     // MARK: Lifecycle
@@ -99,7 +110,7 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
     }
 
     func adjustTrackCount(by delta: Int) {
-        targetTrackCount = max(20, min(400, targetTrackCount + delta))
+        targetTrackCount = Self.clampTrackCount(targetTrackCount + delta)
         let n = targetTrackCount
         engineQueue.async { [engine] in engine.config.targetTrackCount = n }
     }
