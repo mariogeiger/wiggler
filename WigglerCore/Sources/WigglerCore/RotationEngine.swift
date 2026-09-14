@@ -110,6 +110,8 @@ public struct EngineOutput {
     public var angleDispersionDegrees: Double = 0
     public var relocalizerAnalysed = false
     public var lastRelocalizationAge: Int = -1
+    /// 1-sigma uncertainty of the absolute angle (degrees): small while everything agrees, large after a loss.
+    public var angleUncertaintyDegrees: Double = 0
     public init() {}
 }
 
@@ -131,11 +133,10 @@ public struct EngineConfig {
     /// A track whose depth jumps by more than this fraction between consecutive samples is on a depth edge
     /// (LiDAR bleeding from the background): the sample is skipped.
     public var maxDepthJumpFraction = 0.08
-    public var relocGain = 0.15
-    public var relocJumpFrames = 6
-    /// Jumps of the absolute angle are only allowed within this many frames after the geometric tracking recovered
-    /// from a loss; a long healthy streak means the appearance library is stale instead.
-    public var relocJumpGraceFrames = 180
+    /// Points below which the geometric angle is not considered a measurement of the object.
+    public var minHealthyInliers = 20
+    /// The library is rebuilt when a strong appearance match has contradicted a healthy geometry for this long.
+    public var staleLibrarySeconds = 2.0
     public var relocRefreshAlpha: Float = 0.05
     public var descriptorSide = 32
     public var keyframeBins = 36
@@ -185,14 +186,17 @@ public final class RotationEngine {
     private var thetaHistory: [Double?] = []
     private var lastAngleOkFrame = -1000
     private var lastRelocFrame = -1000
-    private var relocJump: (target: Double, count: Int)?
+    private var fusion = AngleFusion()
+    /// Ratio between the image-plane rotation and the 3D azimuth increment, learned online (it depends only on
+    /// how the axis is tilted with respect to the camera, so it is constant for a fixed phone).
+    private var imageScale: Double?
+    private var disagreeStreak = 0
     private var lastPose = RigidTransform.identity
     private var lastTimestamp: Double?
     private var rpmFiltered = 0.0
     private var lastInlierCount = 0
     private var lastDispersion = 0.0
     private var lastAngleOk = false
-    private var healthyStreak = 0
 
     public init(config: EngineConfig = EngineConfig()) {
         self.config = config
@@ -230,8 +234,9 @@ public final class RotationEngine {
         thetaHistory.removeAll()
         lastAngleOkFrame = -1000
         lastRelocFrame = -1000
-        relocJump = nil
-        healthyStreak = 0
+        fusion.reset()
+        imageScale = nil
+        disagreeStreak = 0
         rpmFiltered = 0
         lastInlierCount = 0
         lastAngleOk = false
@@ -247,7 +252,7 @@ public final class RotationEngine {
         calibrationStartFrame = frameIndex
         thetaMin = 0; thetaMax = 0
         thetaHistory.removeAll()
-        relocJump = nil
+        fusion.reset()
         for t in tracks { t.lastChordFrame = -1000 }
         state = .calibrating
     }
@@ -278,16 +283,23 @@ public final class RotationEngine {
             return out
         }
 
-        // 1. Track existing points.
+        // 1. Track existing points. The correspondences are kept: they also give the image-plane rotation,
+        //    which cross-checks the 3D geometry later in this frame.
+        var before: [(Float, Float)] = []
+        var after: [(Float, Float)] = []
         if let prev = prevPyramid, prev.levels[0].width == pyramid.levels[0].width {
             var survivors: [Track] = []
             survivors.reserveCapacity(tracks.count)
+            before.reserveCapacity(tracks.count)
+            after.reserveCapacity(tracks.count)
             let roi2 = marker.radius * marker.radius * 1.3 * 1.3
             for t in tracks {
                 let r = klt.track(prev: prev, cur: pyramid, x: t.x, y: t.y)
                 if !r.ok || r.residual > config.maxResidual { continue }
                 let dx = r.x - marker.x, dy = r.y - marker.y
                 if dx * dx + dy * dy > roi2 { continue }
+                before.append((t.x, t.y))
+                after.append((r.x, r.y))
                 t.x = r.x; t.y = r.y; t.age += 1
                 survivors.append(t)
             }
@@ -338,15 +350,7 @@ public final class RotationEngine {
         }
         estimator.prune(before: frameIndex - config.constraintWindowFrames)
 
-        // 4. Axis estimation (periodic).
-        if frameIndex % config.axisUpdateInterval == 0, let est = estimator.estimate() {
-            lastEstimate = est
-            if est.isWellConditioned {
-                updateAxis(with: est, objectRadius: objectRadius)
-            }
-        }
-
-        // 5. Angle.
+        // 4. Angle.
         var angleOk = false
         if let ax = axis {
             var obs: [AngleObservation] = []
@@ -374,13 +378,41 @@ public final class RotationEngine {
         }
         lastAngleOk = angleOk
 
+        // 4b. Cross-check: the image-plane rotation of the same correspondences uses neither depth nor the axis,
+        //     so it fails in different situations than the 3D azimuth. When the two disagree, something else has
+        //     taken over the tracked points (a hand, a reflection) and the geometric angle must not be trusted,
+        //     however many "inliers" it reports.
+        var agrees = true
+        if let sim = similarityRotation(from: before, to: after), sim.inliers >= 8 {
+            if angleOk, abs(angle.lastDelta) > Double.pi / 180 {
+                let ratio = sim.angle / angle.lastDelta
+                imageScale = imageScale.map { 0.9 * $0 + 0.1 * ratio } ?? ratio
+            }
+            if let scale = imageScale {
+                let predicted = scale * angle.lastDelta
+                agrees = abs(sim.angle - predicted) < 3 * Double.pi / 180 + 0.35 * abs(predicted)
+            }
+        }
+        disagreeStreak = agrees ? 0 : disagreeStreak + 1
+        let geometryHealthy = angleOk && lastInlierCount >= config.minHealthyInliers && disagreeStreak < 3
+
+        // 5. Axis refinement — deliberately *after* the angle update. Re-anchoring the per-track offsets first
+        //    would make every candidate agree with the current angle, silently throwing away one frame of motion
+        //    every `axisUpdateInterval` frames (a systematic ~7 % under-estimation of the rotation).
+        if frameIndex % config.axisUpdateInterval == 0, let est = estimator.estimate() {
+            lastEstimate = est
+            if est.isWellConditioned {
+                updateAxis(with: est, objectRadius: objectRadius)
+            }
+        }
+
         // 6. State transitions and relocalisation.
         switch state {
         case .calibrating:
             if axis != nil, let est = lastEstimate, est.isWellConditioned, thetaMax - thetaMin >= 2 * .pi {
                 state = .locked
                 reloc.reset()
-                relocJump = nil
+                fusion.reset()
             }
         case .locked, .lost:
             if frameIndex - lastAngleOkFrame > config.lostAfterFrames {
@@ -388,7 +420,8 @@ public final class RotationEngine {
             } else if state == .lost && angleOk {
                 state = .locked
             }
-            relocalise(image: input.image, marker: marker, angleOk: angleOk)
+            relocalise(image: input.image, marker: marker, angleOk: angleOk,
+                       healthy: geometryHealthy, omega: angle.lastDelta / dt, dt: dt)
         case .idle:
             break
         }
@@ -428,18 +461,13 @@ public final class RotationEngine {
             out.heightMax = percentile(heights, 0.95)
         }
         if state == .locked {
+            // Confidence is now a direct reading of the filter: how many points agree, how tightly, and how
+            // uncertain the absolute angle is after gating the appearance measurements.
             var conf = min(1, Double(lastInlierCount) / 15.0)
-            conf *= max(0.3, 1 - lastDispersion / (25 * .pi / 180))
-            if reloc.analysed {
-                if reloc.isRotationallySymmetric {
-                    conf *= 0.4
-                } else if frameIndex - lastRelocFrame > 120 {
-                    conf *= 0.7
-                }
-            } else {
-                conf *= 0.8
-            }
-            out.angleConfidence = angleOk ? conf : 0
+            conf *= max(0.2, 1 - lastDispersion / (25 * Double.pi / 180))
+            conf *= exp(-fusion.sigma / (20 * Double.pi / 180))
+            if reloc.isRotationallySymmetric { conf *= 0.4 }
+            out.angleConfidence = angleOk ? max(0, min(1, conf)) : 0
         }
         out.tracks = tracks.map { t in
             let status: TrackStatus
@@ -452,6 +480,7 @@ public final class RotationEngine {
         out.angleDispersionDegrees = lastDispersion * 180 / .pi
         out.relocalizerAnalysed = reloc.analysed
         out.lastRelocalizationAge = lastRelocFrame < 0 ? -1 : frameIndex - lastRelocFrame
+        out.angleUncertaintyDegrees = fusion.sigma * 180 / .pi
         out.message = statusMessage(out)
         out.processingMillis = Date().timeIntervalSince(t0) * 1000
         return out
@@ -498,7 +527,7 @@ public final class RotationEngine {
                         // axis while keeping the angle continuous; the appearance library is rebuilt.
                         blend(into: old, target: newAxis, alpha: 0.7)
                         reloc.reset()
-                        relocJump = nil
+                        fusion.reset()
                     }
                 }
             }
@@ -556,49 +585,31 @@ public final class RotationEngine {
         if !removed.isEmpty { angle.remove(ids: removed) }
     }
 
-    private func relocalise(image: GrayImage, marker: (x: Float, y: Float, radius: Float), angleOk: Bool) {
+    /// Fuse the appearance measurement into the integrated angle. Returns nothing: everything it does is either
+    /// a bounded correction of `angle`, or bookkeeping on the library.
+    private func relocalise(image: GrayImage, marker: (x: Float, y: Float, radius: Float),
+                            angleOk: Bool, healthy: Bool, omega: Double, dt: Double) {
         let patch = image.patch(centerX: marker.x, centerY: marker.y, halfSize: marker.radius, side: config.descriptorSide)
-        let healthy = angleOk && lastDispersion < 6 * .pi / 180 && lastInlierCount >= 20
-        healthyStreak = healthy ? healthyStreak + 1 : 0
-        if !reloc.isComplete {
-            if angleOk && lastDispersion < 6 * .pi / 180 && lastInlierCount >= 8 {
-                reloc.record(patch: patch, theta: angle.theta)
-                if reloc.isComplete { reloc.analyse() }
-            }
-            return
+        // Fill the library while the geometry is clean. A partially filled library is already useful.
+        if angleOk && lastDispersion < 6 * Double.pi / 180 && lastInlierCount >= 8 && !reloc.isComplete {
+            reloc.record(patch: patch, theta: angle.theta)
         }
-        let match = reloc.match(patch: patch, nearTheta: angle.theta)
-        if let m = match, m.confident {
-            let err = wrapAngle(m.theta - angle.theta)
-            if abs(err) < 20 * .pi / 180 {
-                // Normal regime: gently pull the integrated angle toward the appearance.
-                relocJump = nil
-                if angleOk { angle.shift(by: config.relocGain * err) }
-                lastRelocFrame = frameIndex
-            } else if healthyStreak < config.relocJumpGraceFrames {
-                // Large disagreement shortly after a tracking loss (hand, occlusion): the geometry re-anchored on a
-                // wrong angle — accept the appearance after several consistent frames.
-                if let j = relocJump, abs(wrapAngle(j.target - m.theta)) < 10 * .pi / 180 {
-                    relocJump = (m.theta, j.count + 1)
-                    if j.count + 1 >= config.relocJumpFrames {
-                        angle.shift(by: err)
-                        relocJump = nil
-                        lastRelocFrame = frameIndex
-                    }
-                } else {
-                    relocJump = (m.theta, 1)
-                }
-            } else {
-                // Geometry has been healthy for a long time: the library is what is wrong (object displaced on its
-                // support, lighting…). Do not jump; the refresh below re-aligns the library.
-                relocJump = nil
-            }
-        } else {
-            relocJump = nil
-        }
-        // Keep the library aligned with the current appearance while the geometry is trustworthy.
-        if healthy {
+        guard reloc.isUsable else { return }
+
+        let candidates = reloc.candidates(patch: patch, nearTheta: angle.theta)
+        let (correction, outcome) = fusion.update(theta: angle.theta, omega: omega, healthy: healthy,
+                                                  candidates: candidates, dt: dt)
+        if correction != 0 { angle.shift(by: correction) }
+        if outcome == .updated { lastRelocFrame = frameIndex }
+        // Keep the library in step with the current appearance, but only on a match we actually believe.
+        if healthy && lastDispersion < 6 * Double.pi / 180 && fusion.lastMatchTrusted {
             reloc.refresh(patch: patch, theta: angle.theta, alpha: config.relocRefreshAlpha)
+        }
+        // A strong match that keeps contradicting a healthy geometry means the library, not the geometry, is
+        // wrong: the object was displaced or the light changed. Rebuild it instead of fighting it.
+        if fusion.staleSeconds > config.staleLibrarySeconds {
+            reloc.reset()
+            fusion.clearStale()
         }
     }
 

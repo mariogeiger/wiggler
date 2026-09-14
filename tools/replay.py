@@ -154,6 +154,12 @@ class AngleTracker:
                 self.offset[i] = wrap(phi - self.theta); self.bad[i] = 0
         return ok, inl, disp
 
+    def shift(self, delta):
+        """Absolute correction: theta moves, the per-track offsets follow so nothing is re-anchored."""
+        self.theta += delta
+        for i in list(self.offset):
+            self.offset[i] = wrap(self.offset[i] - delta)
+
     def rebase(self, obs):
         for i, phi, r in obs:
             self.offset[i] = wrap(phi - self.theta); self.bad[i] = 0

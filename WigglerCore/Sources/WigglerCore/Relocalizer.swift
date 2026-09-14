@@ -1,29 +1,32 @@
 import Foundation
 
-/// Appearance-based absolute angle: a library of small normalised patches of the region of interest,
-/// one per angular bin, recorded during one full turn once the axis is locked.
-/// Matching a live patch against the library gives an absolute angle (modulo the object's appearance period),
-/// used to cancel the slow drift of the geometric integration and to recover after occlusions.
+/// Appearance-based absolute angle: a library of small normalised patches of the region of interest, one per
+/// angular bin, filled as the object turns.
+///
+/// The library is usable as soon as a handful of bins exist — waiting for a full turn would leave the absolute
+/// reference unavailable most of the time. Matching only ever considers the bins that have been filled.
 public struct Relocalizer {
     public let side: Int
     public let binCount: Int
-    /// Raw (area-averaged luma) patches per angular bin.
+    /// Raw (area-averaged luma) patches per angular bin; nil where nothing has been recorded yet.
     private var raw: [[Float]?]
-    /// Mean of the raw patches — the static background/illumination that every bin shares.
+    /// Mean of the filled patches — the static background/illumination every bin shares.
     private var meanPatch: [Float] = []
-    /// Centred + normalised descriptors used for matching.
+    /// Centred + normalised descriptors of the filled bins, and the bin index of each.
     private var library: [[Float]] = []
-    private var filled = 0
+    private var index: [Int] = []
+    private(set) public var filled = 0
 
-    /// Smallest appearance period found in the library (radians); 2π for an asymmetric object.
+    /// Smallest appearance period found once the library is complete (radians); 2π for an asymmetric object,
+    /// 0 when the object looks the same from every angle.
     private(set) public var period: Double = 2 * .pi
-    /// Self-similarity score of the library at its period (1 = perfectly periodic). Low values ⇒ unreliable period.
     private(set) public var periodScore: Double = 0
-    /// True when the object looks the same from (almost) every angle ⇒ absolute angle unobservable.
     private(set) public var isRotationallySymmetric = false
     private(set) public var analysed = false
 
     public var binWidth: Double { 2 * .pi / Double(binCount) }
+    /// Enough bins to be worth matching against.
+    public var isUsable: Bool { filled >= 6 }
     public var isComplete: Bool { filled >= binCount }
     public var fillRatio: Double { Double(filled) / Double(binCount) }
 
@@ -36,6 +39,7 @@ public struct Relocalizer {
     public mutating func reset() {
         raw = [[Float]?](repeating: nil, count: binCount)
         library = []
+        index = []
         meanPatch = []
         filled = 0
         period = 2 * .pi
@@ -46,10 +50,9 @@ public struct Relocalizer {
 
     /// Zero-mean, unit-norm descriptor.
     public static func normalise(_ p: [Float]) -> [Float] {
-        let n = Float(p.count)
         var mean: Float = 0
         for v in p { mean += v }
-        mean /= n
+        mean /= Float(p.count)
         var out = p.map { $0 - mean }
         var ss: Float = 0
         for v in out { ss += v * v }
@@ -64,21 +67,49 @@ public struct Relocalizer {
         return Double(s)
     }
 
-    /// Record a live raw patch at angle θ (radians, any range).
-    public mutating func record(patch: [Float], theta: Double) {
-        let bin = Int((positiveAngle(theta) / binWidth).rounded()) % binCount
-        if raw[bin] == nil { filled += 1 }
-        raw[bin] = patch
+    @inline(__always) private func bin(for theta: Double) -> Int {
+        Int((positiveAngle(theta) / binWidth).rounded()) % binCount
     }
 
-    /// Blend a live patch into its bin (the object may have been displaced on its support): the library follows
-    /// the current appearance while older content still anchors it against slow drift.
+    /// Record a live patch at angle θ.
+    public mutating func record(patch: [Float], theta: Double) {
+        let b = bin(for: theta)
+        if raw[b] == nil { filled += 1 }
+        raw[b] = patch
+        rebuild()
+    }
+
+    /// Blend a live patch into its bin: the library follows slow changes (light, small displacements) while the
+    /// older content still anchors it against drift.
     public mutating func refresh(patch: [Float], theta: Double, alpha: Float) {
-        let bin = Int((positiveAngle(theta) / binWidth).rounded()) % binCount
-        guard analysed, var old = raw[bin], old.count == patch.count else { return }
-        for i in 0..<old.count { old[i] += alpha * (patch[i] - old[i]) }
-        raw[bin] = old
-        library[bin] = centred(old)
+        let b = bin(for: theta)
+        if var old = raw[b], old.count == patch.count {
+            for i in 0..<old.count { old[i] += alpha * (patch[i] - old[i]) }
+            raw[b] = old
+        } else {
+            raw[b] = patch
+            filled += 1
+        }
+        rebuild()
+    }
+
+    private mutating func rebuild() {
+        index = (0..<binCount).filter { raw[$0] != nil }
+        guard index.count >= 6, let first = raw[index[0]] else {
+            library = []
+            analysed = false
+            return
+        }
+        var mean = [Float](repeating: 0, count: first.count)
+        for k in index {
+            let p = raw[k]!
+            for i in 0..<mean.count { mean[i] += p[i] }
+        }
+        for i in 0..<mean.count { mean[i] /= Float(index.count) }
+        meanPatch = mean
+        library = index.map { centred(raw[$0]!) }
+        analysed = true
+        if isComplete { analysePeriod() }
     }
 
     private func centred(_ patch: [Float]) -> [Float] {
@@ -87,25 +118,14 @@ public struct Relocalizer {
         return Relocalizer.normalise(out)
     }
 
-    /// Determine the appearance period once the library is complete.
-    public mutating func analyse() {
-        guard isComplete, let first = raw[0] else { return }
-        analysed = true
-        meanPatch = [Float](repeating: 0, count: first.count)
-        for p in raw { for (i, v) in p!.enumerated() { meanPatch[i] += v } }
-        for i in 0..<meanPatch.count { meanPatch[i] /= Float(binCount) }
-        library = raw.map { centred($0!) }
-        // Autocorrelation over bin shifts.
+    /// Appearance period, once every bin exists.
+    private mutating func analysePeriod() {
         var scores = [Double](repeating: 0, count: binCount)
         for shift in 1..<binCount {
             var s = 0.0
-            for k in 0..<binCount {
-                s += Relocalizer.ncc(library[k], library[(k + shift) % binCount])
-            }
+            for k in 0..<binCount { s += Relocalizer.ncc(library[k], library[(k + shift) % binCount]) }
             scores[shift] = s / Double(binCount)
         }
-        // Similarity between neighbouring bins tells us whether the appearance carries an angular signal at all
-        // (the shared static background was removed by `meanPatch`, so a round pot gives only noise here).
         let neighbour = scores[1]
         if neighbour < 0.35 {
             isRotationallySymmetric = true
@@ -114,75 +134,37 @@ public struct Relocalizer {
             return
         }
         isRotationallySymmetric = false
-        // The smallest shift (a divisor of the turn) whose similarity rivals the neighbour similarity is the period.
         period = 2 * .pi
         periodScore = 1
         for shift in 2...(binCount / 2) where binCount % shift == 0 {
-            let s = scores[shift]
-            if s > 0.5 && s >= neighbour - 0.1 {
+            if scores[shift] > 0.5 && scores[shift] >= neighbour - 0.1 {
                 period = Double(shift) * binWidth
-                periodScore = s
+                periodScore = scores[shift]
                 break
             }
         }
     }
 
-    public struct Match {
-        /// Absolute angle candidate closest to `nearTheta` (radians, unwrapped relative to nearTheta).
-        public var theta: Double
-        public var score: Double
-        /// Score of the best bin that is not within ±2 bins of any accepted candidate.
-        public var distinctiveness: Double
-        public var confident: Bool
-    }
-
-    /// Match a live descriptor. `nearTheta` disambiguates periodic objects (choose the candidate closest to it).
-    public func match(patch: [Float], nearTheta: Double) -> Match? {
-        guard analysed, library.count == binCount else { return nil }
-        let descriptor = centred(patch)
-        var scores = [Double](repeating: -2, count: binCount)
-        var best = -2.0
-        for k in 0..<binCount {
-            let s = Relocalizer.ncc(descriptor, library[k])
-            scores[k] = s
-            if s > best { best = s }
-        }
-        if best < 0.55 { return nil }
-        // Candidate bins: local maxima with score close to the best.
-        var candidates: [Int] = []
-        for k in 0..<binCount {
-            let s = scores[k]
-            if s >= best - 0.06 && s >= scores[(k + 1) % binCount] && s >= scores[(k + binCount - 1) % binCount] {
-                candidates.append(k)
+    /// All plausible absolute angles for a live patch, unwrapped around `nearTheta`.
+    /// The fusion decides which one (if any) to believe — that is not this type's job.
+    public func candidates(patch: [Float], nearTheta: Double) -> [AngleFusion.Candidate] {
+        guard analysed, !library.isEmpty else { return [] }
+        let d = centred(patch)
+        var score = [Double](repeating: -2, count: binCount)
+        for (i, k) in index.enumerated() { score[k] = Relocalizer.ncc(d, library[i]) }
+        var out: [AngleFusion.Candidate] = []
+        for k in index {
+            let prev = score[(k + binCount - 1) % binCount]
+            let next = score[(k + 1) % binCount]
+            guard score[k] > 0.5, score[k] >= prev, score[k] >= next else { continue }
+            var frac = 0.0
+            if prev > -1, next > -1 {
+                let den = prev - 2 * score[k] + next
+                if den < -1e-9 { frac = max(-0.5, min(0.5, 0.5 * (prev - next) / den)) }
             }
+            let absolute = (Double(k) + frac) * binWidth
+            out.append(AngleFusion.Candidate(theta: nearTheta + wrapAngle(absolute - nearTheta), score: score[k]))
         }
-        if candidates.isEmpty { return nil }
-        // Choose the candidate closest to the current estimate.
-        var chosen = candidates[0]
-        var bestDist = Double.infinity
-        for k in candidates {
-            let d = abs(wrapAngle(Double(k) * binWidth - nearTheta))
-            if d < bestDist { bestDist = d; chosen = k }
-        }
-        // Sub-bin refinement by parabolic interpolation on the three neighbouring scores.
-        let sm = scores[(chosen + binCount - 1) % binCount], s0 = scores[chosen], sp = scores[(chosen + 1) % binCount]
-        let denom = sm - 2 * s0 + sp
-        var frac = 0.0
-        if denom < -1e-9 { frac = max(-0.5, min(0.5, 0.5 * (sm - sp) / denom)) }
-        let absolute = (Double(chosen) + frac) * binWidth
-        // Distinctiveness: best score outside ±2 bins of all candidates (period-aware ambiguity is expected and fine).
-        var runnerUp = -2.0
-        for k in 0..<binCount {
-            var near = false
-            for c in candidates {
-                let d = min((k - c + binCount) % binCount, (c - k + binCount) % binCount)
-                if d <= 2 { near = true; break }
-            }
-            if !near && scores[k] > runnerUp { runnerUp = scores[k] }
-        }
-        let distinct = best - runnerUp
-        let thetaUnwrapped = nearTheta + wrapAngle(absolute - nearTheta)
-        let confident = best >= 0.6 && distinct >= 0.1 && !isRotationallySymmetric
-        return Match(theta: thetaUnwrapped, score: best, distinctiveness: distinct, confident: confident)
+        return out
     }
 }
