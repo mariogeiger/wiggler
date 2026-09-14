@@ -166,23 +166,7 @@ public struct EngineConfig {
 public final class RotationEngine {
     public var config: EngineConfig
 
-    private final class Track {
-        let id: Int
-        var x: Float
-        var y: Float
-        var samples: [(frame: Int, p: V3)] = []
-        var age = 0
-        var hasDepthThisFrame = false
-        var lastChordFrame = -1000
-        var radius = 0.0
-        var height = 0.0
-        var lastDepth = 0.0
-        var depthRejects = 0
-        init(id: Int, x: Float, y: Float) { self.id = id; self.x = x; self.y = y }
-    }
-
-    private var tracks: [Track] = []
-    private var nextId = 1
+    private let tracks = PointTracks()
     private var prevPyramid: Pyramid?
     private var frameIndex = 0
     private var klt = KLTTracker()
@@ -200,7 +184,6 @@ public final class RotationEngine {
     private var inconsistentAxisCount = 0
     private var calibrationStartFrame = 0
     private var thetaMin = 0.0, thetaMax = 0.0
-    private var thetaHistory: [Double?] = []
     private var lastAngleOkFrame = -1000
     private var lastRelocFrame = -1000
     private var fusion = AngleFusion()
@@ -248,7 +231,6 @@ public final class RotationEngine {
         inconsistentAxisCount = 0
         calibrationStartFrame = frameIndex
         thetaMin = 0; thetaMax = 0
-        thetaHistory.removeAll()
         lastAngleOkFrame = -1000
         lastRelocFrame = -1000
         fusion.reset()
@@ -270,9 +252,8 @@ public final class RotationEngine {
         inconsistentAxisCount = 0
         calibrationStartFrame = frameIndex
         thetaMin = 0; thetaMax = 0
-        thetaHistory.removeAll()
         fusion.reset()
-        for t in tracks { t.lastChordFrame = -1000 }
+        tracks.resetMotionHistory()
         state = .calibrating
     }
 
@@ -304,89 +285,33 @@ public final class RotationEngine {
         }
         guard let marker = marker.map({ Marker(x: $0.x, y: $0.y, radius: roiRadius) }) else {
             out.state = .idle
-            out.message = config.autoMarker ? "Cherche un objet en mouvement… \(locator.movingCount) pts mobiles" : "Touchez l'objet à suivre"
+            out.message = config.autoMarker ? "Looking for a moving object… \(locator.movingCount) moving points" : "Tap the object to track"
             out.processingMillis = Date().timeIntervalSince(t0) * 1000
             return out
         }
 
         // 1. Track existing points. The correspondences are kept: they also give the image-plane rotation,
         //    which cross-checks the 3D geometry later in this frame.
-        var before: [(Float, Float)] = []
-        var after: [(Float, Float)] = []
-        if let prev = prevPyramid, prev.levels[0].width == pyramid.levels[0].width {
-            var survivors: [Track] = []
-            survivors.reserveCapacity(tracks.count)
-            before.reserveCapacity(tracks.count)
-            after.reserveCapacity(tracks.count)
-            let roi2 = marker.radius * marker.radius * 1.3 * 1.3
-            for t in tracks {
-                let r = klt.track(prev: prev, cur: pyramid, x: t.x, y: t.y)
-                if !r.ok || r.residual > config.maxResidual { continue }
-                let dx = r.x - marker.x, dy = r.y - marker.y
-                if dx * dx + dy * dy > roi2 { continue }
-                before.append((t.x, t.y))
-                after.append((r.x, r.y))
-                t.x = r.x; t.y = r.y; t.age += 1
-                survivors.append(t)
-            }
-            tracks = survivors
-        } else {
-            tracks.removeAll()
-        }
+        let (before, after) = tracks.track(from: prevPyramid, to: pyramid, marker: marker,
+                                           tracker: klt, maxResidual: config.maxResidual)
 
         // 2. Depth → 3D samples in world coordinates.
-        let w = Double(input.image.width), h = Double(input.image.height)
-        let K = input.intrinsics
-        for t in tracks {
-            t.hasDepthThisFrame = false
-            guard let depth = input.depth,
-                  let z = depth.sample(u: Double(t.x) / w, v: Double(t.y) / h, minConfidence: config.minDepthConfidence)
-            else { continue }
-            if t.lastDepth > 0 && abs(z - t.lastDepth) > config.maxDepthJumpFraction * t.lastDepth {
-                t.depthRejects += 1
-                if t.depthRejects < 4 { continue }   // persistent change: accept the new depth level
-            }
-            t.depthRejects = 0
-            t.lastDepth = z
-            let xc = (Double(t.x) - K.cx) / K.fx * z
-            let yc = (Double(t.y) - K.cy) / K.fy * z
-            let cam = V3(xc, -yc, -z)  // ARKit camera space
-            let world = pose.apply(cam)
-            if !world.isFinite { continue }
-            t.samples.append((frameIndex, world))
-            if t.samples.count > config.sampleHistory { t.samples.removeFirst(t.samples.count - config.sampleHistory) }
-            t.hasDepthThisFrame = true
-        }
+        tracks.sampleDepth(input, pose: pose, frame: frameIndex, minConfidence: config.minDepthConfidence,
+                           maxJumpFraction: config.maxDepthJumpFraction, historyLength: config.sampleHistory)
 
         // 3. Chord constraints for the axis.
         let objectRadius = currentObjectRadius()
         let dmin = axis == nil ? config.chordMinMeters : min(0.05, max(0.01, 0.1 * objectRadius))
-        for t in tracks where t.hasDepthThisFrame && frameIndex - t.lastChordFrame >= config.chordStride {
-            guard let last = t.samples.last else { continue }
-            for s in t.samples {
-                if frameIndex - s.frame > config.chordMaxFrames { continue }
-                if s.frame >= last.frame { break }
-                let d = last.p - s.p
-                if d.length >= dmin {
-                    estimator.add(ChordConstraint(midpoint: (last.p + s.p) * 0.5, chord: d, frame: frameIndex))
-                    t.lastChordFrame = frameIndex
-                    break
-                }
-            }
+        for chord in tracks.chordConstraints(frame: frameIndex, minLength: dmin,
+                                             maxFrames: config.chordMaxFrames, stride: config.chordStride) {
+            estimator.add(chord)
         }
         estimator.prune(before: frameIndex - config.constraintWindowFrames)
 
         // 4. Angle.
         var angleOk = false
         if let ax = axis {
-            var obs: [AngleObservation] = []
-            obs.reserveCapacity(tracks.count)
-            for t in tracks where t.hasDepthThisFrame {
-                let (phi, r, hgt) = ax.cylindrical(t.samples[t.samples.count - 1].p)
-                t.radius = r; t.height = hgt
-                if r > 0.005 { obs.append(AngleObservation(id: t.id, phi: phi, radius: r)) }
-            }
-            let up = angle.update(obs)
+            let up = angle.update(tracks.project(around: ax))
             angleOk = up.ok
             lastInlierCount = up.inlierCount
             lastDispersion = up.dispersion
@@ -398,9 +323,8 @@ public final class RotationEngine {
             } else {
                 rpmFiltered *= 0.9
             }
-            thetaHistory.append(up.ok ? up.theta : nil)
-            if thetaHistory.count > 120 { thetaHistory.removeFirst(thetaHistory.count - 120) }
-            removeStaticTracks(dmin: dmin)
+            let removed = tracks.removeStatic(theta: up.ok ? up.theta : nil, frame: frameIndex, minLength: dmin)
+            if !removed.isEmpty { angle.remove(ids: removed) }
         }
         lastAngleOk = angleOk
 
@@ -466,13 +390,7 @@ public final class RotationEngine {
 
         // 7. Replenish tracks.
         if tracks.count < config.targetTrackCount && (frameIndex % 5 == 0 || tracks.count < config.targetTrackCount / 3) {
-            let existing = tracks.map { ($0.x, $0.y) }
-            let fresh = corners.detect(in: input.image, centerX: marker.x, centerY: marker.y, radius: marker.radius,
-                                       exclude: existing, maxCount: config.targetTrackCount - tracks.count)
-            for (x, y) in fresh {
-                tracks.append(Track(id: nextId, x: x, y: y))
-                nextId += 1
-            }
+            tracks.replenish(in: input.image, marker: marker, detector: corners, targetCount: config.targetTrackCount)
         }
 
         // 8. Output.
@@ -492,8 +410,7 @@ public final class RotationEngine {
             let q = min(1, est.inlierRatio / 0.7) * min(1, est.coverage / 0.6) * min(1, (0.3 - min(est.planarity, 0.3)) / 0.25)
             out.axisQuality = max(0, min(1, q))
         }
-        let radii = tracks.filter { $0.hasDepthThisFrame && angle.isConsistent(id: $0.id) }.map { $0.radius }
-        let heights = tracks.filter { $0.hasDepthThisFrame && angle.isConsistent(id: $0.id) }.map { $0.height }
+        let (radii, heights) = tracks.extent { angle.isConsistent(id: $0) }
         out.objectRadius = radii.isEmpty ? objectRadius : percentile(radii, 0.8)
         if !heights.isEmpty {
             out.heightMin = percentile(heights, 0.05)
@@ -508,14 +425,7 @@ public final class RotationEngine {
             if reloc.isRotationallySymmetric { conf *= 0.4 }
             out.angleConfidence = angleOk ? max(0, min(1, conf)) : 0
         }
-        out.tracks = tracks.map { t in
-            let status: TrackStatus
-            if t.age < 3 { status = .young }
-            else if !t.hasDepthThisFrame { status = .noDepth }
-            else if axis != nil && !angle.isConsistent(id: t.id) { status = .inconsistent }
-            else { status = .good }
-            return TrackDebug(x: t.x, y: t.y, status: status)
-        }
+        out.tracks = tracks.debug(hasAxis: axis != nil) { angle.isConsistent(id: $0) }
         out.angleDispersionDegrees = lastDispersion * 180 / .pi
         out.relocalizerAnalysed = reloc.analysed
         out.lastRelocalizationAge = lastRelocFrame < 0 ? -1 : frameIndex - lastRelocFrame
@@ -529,8 +439,7 @@ public final class RotationEngine {
 
     private func currentObjectRadius() -> Double {
         guard axis != nil else { return 0.1 }
-        let radii = tracks.filter { $0.radius > 0 }.map { $0.radius }
-        return radii.isEmpty ? 0.1 : percentile(radii, 0.8)
+        return tracks.objectRadius
     }
 
     private func updateAxis(with est: AxisEstimate, objectRadius: Double) {
@@ -596,32 +505,7 @@ public final class RotationEngine {
 
     private func rebaseAngle() {
         guard let ax = axis else { return }
-        var obs: [AngleObservation] = []
-        for t in tracks where t.hasDepthThisFrame {
-            let (phi, r, _) = ax.cylindrical(t.samples[t.samples.count - 1].p)
-            if r > 0.005 { obs.append(AngleObservation(id: t.id, phi: phi, radius: r)) }
-        }
-        angle.rebase(obs)
-    }
-
-    /// Background points do not move while the object turns; drop them.
-    private func removeStaticTracks(dmin: Double) {
-        let span = 60
-        guard thetaHistory.count > span, let now = thetaHistory[thetaHistory.count - 1],
-              let before = thetaHistory[thetaHistory.count - 1 - span] else { return }
-        if abs(now - before) < 20 * .pi / 180 { return }
-        var removed: [Int] = []
-        tracks.removeAll { t in
-            guard let last = t.samples.last, let first = t.samples.first(where: { frameIndex - $0.frame <= span }),
-                  last.frame - first.frame >= span - 5 else { return false }
-            var maxD = 0.0
-            for s in t.samples where s.frame >= first.frame {
-                maxD = max(maxD, (s.p - last.p).length)
-            }
-            if maxD < dmin { removed.append(t.id); return true }
-            return false
-        }
-        if !removed.isEmpty { angle.remove(ids: removed) }
+        angle.rebase(tracks.observations(around: ax))
     }
 
     /// Fuse the appearance measurement into the integrated angle. Returns nothing: everything it does is either
@@ -654,18 +538,18 @@ public final class RotationEngine {
 
     private func statusMessage(_ out: EngineOutput) -> String {
         switch out.state {
-        case .idle: return "Touchez l'objet à suivre"
+        case .idle: return "Tap the object to track"
         case .calibrating:
-            if out.trackCount < 10 { return "Pas assez de texture / profondeur autour du repère" }
-            if out.constraintCount < 150 { return "Faites tourner l'objet…" }
-            if axis == nil { return "Recherche de l'axe… (\(out.constraintCount) cordes)" }
-            return String(format: "Axe provisoire — tour complet : %.0f°/360°", min(out.turnCoverageDegrees, 360))
+            if out.trackCount < 10 { return "Not enough texture / depth around the marker" }
+            if out.constraintCount < 150 { return "Rotate the object…" }
+            if axis == nil { return "Finding the axis… (\(out.constraintCount) chords)" }
+            return String(format: "Provisional axis — full turn: %.0f°/360°", min(out.turnCoverageDegrees, 360))
         case .locked:
-            if !reloc.isComplete { return String(format: "Axe verrouillé — apprentissage de l'aspect %.0f %%", reloc.fillRatio * 100) }
-            if reloc.isRotationallySymmetric { return "Objet à symétrie de révolution : angle relatif seulement" }
-            if reloc.period < 2 * .pi - 1e-6 { return String(format: "Suivi — période d'aspect %.0f°", reloc.period * 180 / .pi) }
-            return "Suivi"
-        case .lost: return "Suivi perdu — dégagez la vue ou faites tourner l'objet"
+            if !reloc.isComplete { return String(format: "Axis locked — learning appearance %.0f %%", reloc.fillRatio * 100) }
+            if reloc.isRotationallySymmetric { return "Rotationally symmetric object: relative angle only" }
+            if reloc.period < 2 * .pi - 1e-6 { return String(format: "Tracking — appearance period %.0f°", reloc.period * 180 / .pi) }
+            return "Tracking"
+        case .lost: return "Tracking lost — clear the view or rotate the object"
         }
     }
 }
