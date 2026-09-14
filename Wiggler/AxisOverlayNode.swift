@@ -17,6 +17,9 @@ final class AxisOverlayNode: SCNNode {
         lineMat.diffuse.contents = UIColor.red
         lineMat.emission.contents = UIColor.red
         lineMat.lightingModel = .constant
+        lineMat.readsFromDepthBuffer = false
+        lineMat.writesToDepthBuffer = false
+        axisLine.renderingOrder = 10
         axisLine.geometry = SCNCylinder(radius: 0.002, height: CGFloat(span))
         axisLine.geometry?.materials = [lineMat]
 
@@ -25,7 +28,9 @@ final class AxisOverlayNode: SCNNode {
         rayMat.emission.contents = UIColor.orange
         rayMat.lightingModel = .constant
         rayMat.isDoubleSided = true
+        rayMat.readsFromDepthBuffer = false
         rayMat.writesToDepthBuffer = false
+        ray.renderingOrder = 10
         // A thin half-plane: unit box scaled to (radius, span, ~0), shifted so it starts at the axis.
         ray.geometry = SCNBox(width: 1, height: 1, length: 0.0015, chamferRadius: 0)
         ray.geometry?.materials = [rayMat]
@@ -60,11 +65,11 @@ final class AxisOverlayNode: SCNNode {
             ray.scale = SCNVector3(Float(radius), span, 1)
             ray.position = SCNVector3(Float(0.5 * radius), 0, 0)
         }
-        let visible = !hideRay && out.state == .locked && out.angleConfidence > 0.15
+        let visible = !hideRay && out.axisStable && out.angleConfidence > 0.15
         rayPivot.isHidden = !visible
         rayPivot.eulerAngles = SCNVector3(0, Float(out.theta), 0)
         ray.geometry?.firstMaterial?.diffuse.contents = UIColor.orange.withAlphaComponent(CGFloat(0.35 + 0.6 * out.angleConfidence))
-        let axisColor = out.state == .locked ? UIColor.green : UIColor.red
+        let axisColor = out.axisStable ? UIColor.green : UIColor.red
         axisLine.geometry?.firstMaterial?.diffuse.contents = axisColor
         axisLine.geometry?.firstMaterial?.emission.contents = axisColor
     }

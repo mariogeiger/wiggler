@@ -26,8 +26,6 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
         didSet { UserDefaults.standard.set(harmonicOrder ?? 0, forKey: Self.harmonicOrderKey) }
     }
     private static let harmonicOrderKey = "harmonicOrder"
-    /// Latest rendered harmonic overlay (engine image size), nil when hidden.
-    @Published private(set) var harmonicImage: CGImage?
     /// Fraction of the first full turn the harmonic map has accumulated (it is drawn from 1).
     @Published private(set) var harmonicProgress = 0.0
     @Published private(set) var recorderStatus = SessionRecorder.Status(recording: false, seconds: 0, megabytes: 0, frames: 0, fileName: "")
@@ -52,20 +50,18 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
     private var processedFps = 0.0
     private var lastProcessedTimestamp: Double?
     private let overlay = AxisOverlayNode()
+    private let harmonicOverlay = HarmonicOverlayNode()
     private let lock = NSLock()
     private var latestOutput = EngineOutput()
+    private var latestHarmonicImage: CGImage?
     private var latestDisplayTransform = CGAffineTransform.identity
     private var viewportSize = CGSize(width: 1, height: 1)
     private var lastPublish = Date.distantPast
-    // Harmonic map (engine queue). It accumulates whenever the angle is tracked, so switching the display on is
-    // instant.
+    // Engine queue. Only stable measurements contribute to the map, even when its display is off.
     private var harmonics = HarmonicMap(width: FrameConverter.engineWidth, height: FrameConverter.engineHeight,
                                         orders: ARSessionController.harmonicOrders)
     private var harmonicOrderEngine: Int?
-    /// The harmonic overlay is on screen (engine queue; mirrored under `lock` for the render thread, which then
-    /// withdraws the ray while keeping the axis visible).
-    private var harmonicShown = false
-    private var harmonicShownForRender = false
+    private var renderedHarmonicImage: CGImage?
     private var lastHarmonicRender = Date.distantPast
     /// Fully opaque at this luma modulation (20 of 255 levels).
     private let harmonicFullScale: Float = 20 / 255
@@ -78,6 +74,7 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
         sceneView.automaticallyUpdatesLighting = true
         sceneView.rendersContinuously = true
         sceneView.preferredFramesPerSecond = 60
+        sceneView.scene.rootNode.addChildNode(harmonicOverlay)
         sceneView.scene.rootNode.addChildNode(overlay)
         overlay.isHidden = true
         let saved = UserDefaults.standard.integer(forKey: Self.trackCountKey)
@@ -193,6 +190,7 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
             updateHarmonics(input: input, output: out)
             lock.lock()
             latestOutput = out
+            latestHarmonicImage = renderedHarmonicImage
             latestDisplayTransform = transform
             engineBusy = false
             lock.unlock()
@@ -220,35 +218,28 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
 
     /// Engine queue. Feeds the harmonic map and publishes its rendering at ≤ 15 Hz while it is meaningful.
     private func updateHarmonics(input: FrameInput, output out: EngineOutput) {
-        switch out.state {
-        case .locked: harmonics.add(image: input.image, theta: out.theta)
-        case .lost: break                         // the angle is held, not measured: neither add nor forget
-        case .idle, .calibrating: harmonics.reset()  // the angle reference is about to change
-        }
+        harmonics.update(image: input.image, output: out)
         let now = Date()
-        let show = harmonicOrderEngine != nil && out.state == .locked && harmonics.hasFullTurn
+        let show = harmonicOrderEngine != nil && out.axisStable && harmonics.hasFullTurn
         if show {
             guard now.timeIntervalSince(lastHarmonicRender) > 1.0 / 15.0, let l = harmonicOrderEngine,
                   let rgba = harmonics.render(order: l, theta: out.theta, fullScale: harmonicFullScale) else { return }
             lastHarmonicRender = now
-            let image = CGImage.rgba8(width: harmonics.width, height: harmonics.height, bytes: rgba)
-            harmonicShown = image != nil
-            lock.lock(); harmonicShownForRender = harmonicShown; lock.unlock()
-            DispatchQueue.main.async { [weak self] in self?.harmonicImage = image }
-        } else if harmonicShown {
-            harmonicShown = false
-            lock.lock(); harmonicShownForRender = false; lock.unlock()
-            DispatchQueue.main.async { [weak self] in self?.harmonicImage = nil }
+            renderedHarmonicImage = CGImage.rgba8(width: harmonics.width, height: harmonics.height, bytes: rgba)
+        } else {
+            renderedHarmonicImage = nil
         }
     }
 
     // MARK: ARSCNViewDelegate (render thread)
 
-    func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
+    func renderer(_ renderer: SCNSceneRenderer, willRenderScene scene: SCNScene, atTime time: TimeInterval) {
         lock.lock()
         let out = latestOutput
-        let hideRay = harmonicShownForRender
+        let image = latestHarmonicImage
+        let transform = latestDisplayTransform
         lock.unlock()
-        overlay.update(with: out, hideRay: hideRay)
+        harmonicOverlay.update(image: image, displayTransform: transform, view: sceneView)
+        overlay.update(with: out, hideRay: image != nil)
     }
 }

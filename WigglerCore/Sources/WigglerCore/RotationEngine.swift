@@ -101,6 +101,8 @@ public struct EngineOutput {
     /// Angle in degrees in [0, 360).
     public var angleDegrees: Double = 0
     public var angleConfidence: Double = 0
+    /// Fresh, consistent geometry with a stationary camera and a measured angle.
+    public var axisStable = false
     public var axisQuality: Double = 0
     public var rpm: Double = 0
     /// Appearance period in degrees (360 asymmetric, 180 two-fold, … ; 0 = rotationally symmetric / unknown).
@@ -139,6 +141,8 @@ public struct EngineConfig {
     public var sampleHistory = 90
     public var lockedDriftFrames = 3      // consecutive inconsistent axis estimates before adopting the new axis
     public var axisConstraintCapacity = 24000
+    /// Median circular-trajectory error above which fresh points invalidate the axis (meters).
+    public var axisMotionToleranceMeters = 0.01
     /// A track whose depth jumps by more than this fraction between consecutive samples is on a depth edge
     /// (LiDAR bleeding from the background): the sample is skipped.
     public var maxDepthJumpFraction = 0.08
@@ -178,6 +182,8 @@ public final class RotationEngine {
     private var locator = MotionLocator()
     private var lostSince: Double?
     private var axis: Axis?
+    private var displayedAxis: Axis?
+    private var stability = AxisStability()
     private var lastEstimate: AxisEstimate?
     private var inconsistentAxisCount = 0
     private var calibrationStartFrame = 0
@@ -207,8 +213,10 @@ public final class RotationEngine {
     // MARK: Marker
 
     private func beginTracking(x: Float, y: Float) {
+        let previousAxis = axis ?? displayedAxis
         marker = (x, y)
         resetMeasurement()
+        displayedAxis = previousAxis
         state = .calibrating
     }
 
@@ -220,10 +228,12 @@ public final class RotationEngine {
 
     private func resetMeasurement() {
         tracks.removeAll()
+        displayedAxis = nil
         estimator.removeAll()
         angle.reset()
         reloc.reset()
         axis = nil
+        stability.reset()
         lastEstimate = nil
         inconsistentAxisCount = 0
         calibrationStartFrame = frameIndex
@@ -240,16 +250,9 @@ public final class RotationEngine {
     }
 
     private func restartCalibration() {
-        estimator.removeAll()
-        angle.reset()
-        reloc.reset()
-        axis = nil
-        lastEstimate = nil
-        inconsistentAxisCount = 0
-        calibrationStartFrame = frameIndex
-        thetaMin = 0; thetaMax = 0
-        fusion.reset()
-        tracks.resetChordCadence()
+        let previousAxis = axis ?? displayedAxis
+        resetMeasurement()
+        displayedAxis = previousAxis
         state = .calibrating
     }
 
@@ -299,19 +302,29 @@ public final class RotationEngine {
 
         // 1. Reuse the motion search's correspondences; each corner is tracked only once per frame.
         let selected = locator.selected(around: marker, retaining: tracks.ids, limit: config.targetTrackCount)
+        if !locator.motionValid {
+            restartCalibration()
+        }
         let (before, after) = tracks.update(selected)
         angle.removeAllExcept(ids: tracks.ids)
 
         // 2. Depth → 3D samples in world coordinates.
-        tracks.sampleDepth(input, pose: pose, frame: frameIndex, minConfidence: config.minDepthConfidence,
-                           maxJumpFraction: config.maxDepthJumpFraction, historyLength: config.sampleHistory)
+        if locator.motionValid {
+            tracks.sampleDepth(input, pose: pose, frame: frameIndex, minConfidence: config.minDepthConfidence,
+                               maxJumpFraction: config.maxDepthJumpFraction, historyLength: config.sampleHistory)
+        }
 
         // 3. Chord constraints for the axis.
         let objectRadius = currentObjectRadius()
         let dmin = axis == nil ? config.chordMinMeters : min(0.05, max(0.01, 0.1 * objectRadius))
-        for chord in tracks.chordConstraints(frame: frameIndex, minLength: dmin,
-                                             maxFrames: config.chordMaxFrames, stride: config.chordStride) {
-            estimator.add(chord)
+        let chords = tracks.chordConstraints(frame: frameIndex, minLength: dmin,
+                                             maxFrames: config.chordMaxFrames, stride: config.chordStride)
+        if let ax = axis, stability.observe(chords: chords, axis: ax, tolerance: config.axisMotionToleranceMeters,
+                                          required: config.lockedDriftFrames) {
+            restartCalibration()
+            tracks.update(selected)
+        } else {
+            for chord in chords { estimator.add(chord) }
         }
         estimator.prune(before: frameIndex - config.constraintWindowFrames)
 
@@ -354,12 +367,19 @@ public final class RotationEngine {
         // 5. Axis refinement — deliberately *after* the angle update. Re-anchoring the per-track offsets first
         //    would make every candidate agree with the current angle, silently throwing away one frame of motion
         //    every `axisUpdateInterval` frames (a systematic ~7 % under-estimation of the rotation).
-        if frameIndex % config.axisUpdateInterval == 0, let est = estimator.estimate() {
-            lastEstimate = est
-            if est.isWellConditioned {
+        if frameIndex % max(1, config.axisUpdateInterval) == 0,
+           stability.hasNewEvidence(frame: estimator.newestFrame) {
+            let evidenceFrame = estimator.newestFrame
+            if let est = estimator.estimate(), est.isWellConditioned {
+                lastEstimate = est
+                let consistent = axis.map { AxisStability.agrees(est.axis, with: $0, objectRadius: objectRadius) } ?? false
                 updateAxis(with: est, objectRadius: objectRadius)
+                stability.observe(frame: evidenceFrame, consistent: consistent)
+            } else {
+                stability.invalidate()
             }
         }
+        if !geometryHealthy || !locator.motionValid { stability.invalidate() }
 
         // 6. State transitions and relocalisation.
         switch state {
@@ -396,7 +416,8 @@ public final class RotationEngine {
         // 8. Output.
         out.state = state
         out.marker = marker
-        out.axis = axis
+        out.axis = axis ?? displayedAxis
+        out.axisStable = axis != nil && state == .locked && stability.isStable(required: config.lockedDriftFrames)
         out.theta = angle.theta
         out.angleDegrees = positiveAngle(angle.theta) * 180 / .pi
         out.rpm = rpmFiltered
@@ -451,8 +472,7 @@ public final class RotationEngine {
             let d = newAxis.origin - old.origin
             let perp = d - old.direction * d.dot(old.direction)
             let lineDistance = perp.length
-            let tolDist = max(0.05, 0.5 * objectRadius)
-            let consistent = angleBetween < 12 * .pi / 180 && lineDistance < tolDist
+            let consistent = AxisStability.agrees(newAxis, with: old, objectRadius: objectRadius)
             if state == .calibrating {
                 // Follow the estimate closely while calibrating.
                 blend(into: old, target: newAxis, alpha: 0.5)
@@ -468,8 +488,6 @@ public final class RotationEngine {
                     if farOff {
                         // The object was replaced / moved a lot: start over.
                         restartCalibration()
-                        axis = newAxis
-                        rebaseAngle()
                     } else {
                         // Semi-static drift (chair rolled a little, axis re-estimated more precisely): adopt the new
                         // axis while keeping the angle continuous; the appearance library is rebuilt.

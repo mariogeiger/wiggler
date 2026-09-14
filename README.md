@@ -42,9 +42,12 @@ an occlusion or a stale library to test those two key behaviors.
    stationary are replaced by moving points. When everything stops, existing tracks are preserved.
    If another region becomes active while the first stops, calibration restarts on the new region.
 3. Rotate the object. In the calibrating state, the app collects 3D chords until it finds a well-conditioned
-   axis, then waits for a full turn. The axis is red while calibrating or tracking is lost, and green once
-   locked. The orange ray rotates with the object when its angle is reliable. The axis remains displayed
-   with the harmonic overlay; only the ray is hidden in that mode.
+   axis, then waits for a full turn. The axis is red while uncertain and green after fresh, consistent
+   estimates confirm it. The orange ray rotates with the object when its angle is reliable. The axis is
+   drawn above the harmonic map; only the ray is hidden in that mode.
+   Moving the phone, losing its pose, or detecting a displaced object axis invalidates the measurement.
+   The last axis stays visible in red while calibration restarts. The harmonic map is discarded on any
+   instability and rebuilt from a new full turn of stable measurements, never resumed from stale pixels.
 4. During the first turn after locking, the app learns the object's appearance every 10° (appearance gauge).
    It then continuously aligns the absolute angle with this library and detects the appearance period:
    360° for an arbitrary object, 180°, 120°… or rotational symmetry. For a body of revolution, only the relative
@@ -181,8 +184,9 @@ the 5th–95th percentiles of consistent tracks.
 * **Box at the seat edge:** failed because the smoothed 256×192 LiDAR assigned the depth of the floor behind it
   to the box's points. Per-track depth-jump rejection (> 8%) was added. A practical rule is to aim inside the
   depth silhouette.
-* **Unwanted recalibrations:** the re-estimated axis moved by 3–8 cm as the chair rolled. Tolerances were widened,
-  and the new axis is now adopted gradually instead of restarting calibration.
+* **Axis motion:** fresh chords are checked before the long observation window can hide a moved object.
+  A majority above 1 cm of circular-trajectory error marks the axis uncertain; three consecutive suspect
+  batches restart calibration. Fresh, consistent estimates are needed before the axis turns green again.
 * **Hand-held object without a fixed axis:** never locked, with planarity about 0.4, as intended.
 * **Recording `wiggler-20260914-154441`:** locked after one turn (10 s), appearance library complete at 14 s,
   confidence 0.8–0.99, dispersion 1–3°. Hand occlusions and direction reversals were handled successfully.

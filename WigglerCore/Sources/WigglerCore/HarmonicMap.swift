@@ -53,6 +53,15 @@ public struct HarmonicMap {
     public var turnProgress: Double { min(1, moments[0] / (window * (1 - exp(-2 * .pi / window)))) }
     public var hasFullTurn: Bool { turnProgress >= 1 }
 
+    /// Accumulate only a stable measurement. Invalidation discards both the fit and the angle reference.
+    public mutating func update(image: GrayImage, output: EngineOutput) {
+        guard output.axisStable && output.state == .locked else {
+            if thetaPrev != nil { reset() }
+            return
+        }
+        add(image: image, theta: output.theta)
+    }
+
     /// The basis evaluated at θ with τ = 0.
     private func basis(theta: Double) -> [Double] {
         var phi = [Double](repeating: 0, count: terms)

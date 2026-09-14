@@ -22,8 +22,6 @@ struct ContentView: View {
             ZStack {
                 ARViewContainer(controller: controller)
 
-                ImageOverlay(controller: controller, image: controller.harmonicImage)
-                    .allowsHitTesting(false)
                 pointsOverlay
                     .allowsHitTesting(false)
                 markerOverlay
