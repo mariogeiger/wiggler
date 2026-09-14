@@ -120,6 +120,26 @@ public struct Relocalizer {
 
     /// Appearance period, once every bin exists.
     private mutating func analysePeriod() {
+        // Rotational symmetry = the appearance does not depend on θ: the variance of the patches *across bins*
+        // (around the mean patch) is a negligible fraction of their total variance (around a flat grey).
+        // Adjacent-bin correlation cannot tell this apart from fine texture, which also decorrelates within a bin.
+        var between: Float = 0, total: Float = 0, grey: Float = 0
+        for v in meanPatch { grey += v }
+        grey /= Float(max(meanPatch.count, 1))
+        for k in 0..<binCount {
+            let p = raw[k]!
+            for i in 0..<p.count {
+                between += (p[i] - meanPatch[i]) * (p[i] - meanPatch[i])
+                total += (p[i] - grey) * (p[i] - grey)
+            }
+        }
+        let thetaDependence = Double(between / max(total, 1e-12))
+        if thetaDependence < 0.1 {
+            isRotationallySymmetric = true
+            period = 0
+            periodScore = thetaDependence
+            return
+        }
         var scores = [Double](repeating: 0, count: binCount)
         for shift in 1..<binCount {
             var s = 0.0
@@ -127,12 +147,6 @@ public struct Relocalizer {
             scores[shift] = s / Double(binCount)
         }
         let neighbour = scores[1]
-        if neighbour < 0.35 {
-            isRotationallySymmetric = true
-            period = 0
-            periodScore = neighbour
-            return
-        }
         isRotationallySymmetric = false
         period = 2 * .pi
         periodScore = 1

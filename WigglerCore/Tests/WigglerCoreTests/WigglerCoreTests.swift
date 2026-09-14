@@ -174,15 +174,30 @@ final class AxisAndAngleTests: XCTestCase {
         }
         for b in 0..<36 { reloc.record(patch: patch(Double(b) * 10 * .pi / 180), theta: Double(b) * 10 * .pi / 180) }
         XCTAssertTrue(reloc.isComplete)
-        reloc.analyse()
+        XCTAssertTrue(reloc.analysed)
         XCTAssertEqual(reloc.period * 180 / .pi, 180, accuracy: 1e-6)
         XCTAssertFalse(reloc.isRotationallySymmetric)
-        let m = reloc.match(patch: patch(47 * .pi / 180), nearTheta: 40 * .pi / 180)!
-        XCTAssertEqual(m.theta * 180 / .pi, 47, accuracy: 4)
-        XCTAssertTrue(m.confident)
-        // Same appearance half a turn later: the candidate nearest to the current estimate wins.
-        let m2 = reloc.match(patch: patch(47 * .pi / 180), nearTheta: 230 * .pi / 180)!
-        XCTAssertEqual(m2.theta * 180 / .pi, 227, accuracy: 4)
+        // Two-fold symmetry: the live patch matches two bins half a turn apart. Both are reported, unwrapped
+        // around the current estimate; choosing between them is the fusion's job.
+        let c = reloc.candidates(patch: patch(47 * .pi / 180), nearTheta: 40 * .pi / 180)
+        let degs = c.map { $0.theta * 180 / .pi }.sorted()
+        XCTAssertEqual(degs.count, 2)
+        XCTAssertEqual(degs[0], -133, accuracy: 4)
+        XCTAssertEqual(degs[1], 47, accuracy: 4)
+        XCTAssertTrue(c.allSatisfy { $0.score > 0.8 })
+        let c2 = reloc.candidates(patch: patch(47 * .pi / 180), nearTheta: 230 * .pi / 180)
+        XCTAssertEqual(c2.map { $0.theta * 180 / .pi }.sorted()[0], 227, accuracy: 4)
+
+        // A body of revolution: the patch does not depend on θ beyond sensor noise.
+        var sym = Relocalizer(side: 8, binCount: 36)
+        for b in 0..<36 { sym.record(patch: bg.map { $0 + Float(rng.gaussian(0.01)) }, theta: Double(b) * 10 * .pi / 180) }
+        XCTAssertTrue(sym.isRotationallySymmetric)
+        XCTAssertEqual(sym.period, 0)
+        // Fine texture decorrelates within one bin but is not symmetry: the appearance still depends on θ.
+        var fine = Relocalizer(side: 8, binCount: 36)
+        for b in 0..<36 { fine.record(patch: (0..<64).map { _ in Float(rng.uniform(0, 1)) }, theta: Double(b) * 10 * .pi / 180) }
+        XCTAssertFalse(fine.isRotationallySymmetric)
+        XCTAssertEqual(fine.period, 2 * .pi, accuracy: 1e-9)
     }
 }
 

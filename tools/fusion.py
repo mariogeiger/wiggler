@@ -211,6 +211,10 @@ class FusedFilter:
         self.stale = 0.0                # seconds a healthy geometry has been contradicted by a strong match
         self.trusted = False            # the last match was sharp and consistent: safe to refresh the library
 
+    @staticmethod
+    def sigma_m(score):
+        return np.radians(5) / max(score, 0.3)     # a sharp match is worth about one bin
+
     def update(self, state, cands, healthy, dt):
         omega = abs(state["omega"])                       # rad/s, from the geometric increment
         if healthy:
@@ -225,9 +229,13 @@ class FusedFilter:
         tag = "none"
         self.trusted = False
         if cands:
-            gate = min(3 * self.sigma, np.pi)
+            # Innovation gate on the *innovation* covariance S = P + R: the measurement's own noise (about one bin,
+            # sharper for a strong match) is part of what makes a normal innovation. Gating on P alone rejects
+            # ordinary measurements once the state is confident, then mistakes them for a stale library.
             ref = th + self.pending
-            inside = [(m, sc) for m, sc in cands if abs(wrap(m - ref)) < gate and sc > 0.55]
+            def gate(sc):
+                return min(3 * np.hypot(self.sigma, self.sigma_m(sc)), np.pi)
+            inside = [(m, sc) for m, sc in cands if abs(wrap(m - ref)) < gate(sc) and sc > 0.55]
             best_all = max(cands, key=lambda x: x[1])
             best_in = max(inside, key=lambda x: x[1]) if inside else None
             # Validation: if the strongest match sits outside the gate and is clearly better than anything inside,
@@ -236,13 +244,13 @@ class FusedFilter:
             if best_in is None or best_all[1] > best_in[1] + 0.05:
                 # Only a *strong* match that lands far from the state means the library is wrong about the scene;
                 # a weak one just means the object is not clearly visible right now.
-                if state["healthy"] and best_all[1] > 0.7 and abs(wrap(best_all[0] - ref)) > gate:
+                if state["healthy"] and best_all[1] > 0.7 and abs(wrap(best_all[0] - ref)) > gate(best_all[1]):
                     self.stale += dt
                 tag = "gated" if best_in is None else "ambiguous"
             else:
                 m, sc = best_in
                 innov = wrap(m - ref)
-                sigma_m = np.radians(5) / max(sc, 0.3)     # a sharp match is worth about one bin
+                sigma_m = self.sigma_m(sc)
                 k = self.sigma ** 2 / (self.sigma ** 2 + sigma_m ** 2)
                 self.pending += k * innov
                 self.sigma = np.sqrt((1 - k) * self.sigma ** 2)

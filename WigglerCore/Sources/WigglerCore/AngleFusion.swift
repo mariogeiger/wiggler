@@ -16,9 +16,10 @@ import Foundation
 /// 2. **An honest uncertainty.** `sigma` grows at the rate the angle can actually run away: as a random walk
 ///    through track turnover while the geometry measures, and *linearly* at the rotation speed itself while it
 ///    does not, because an object nobody is watching keeps turning the same way.
-/// 3. **Gate and validate.** A match is used only inside a 3-sigma innovation gate, and only if no clearly better
-///    match sits outside it. After a healthy run the gate is a few degrees, so the 120° lobe of a hexagonal box
-///    cannot be followed; after a real loss the gate opens to ±180°, so the absolute angle can be re-acquired.
+/// 3. **Gate and validate.** A match is used only inside a 3-sigma innovation gate (sigma of the *innovation*:
+///    state and measurement noise together), and only if no clearly better match sits outside it. After a healthy
+///    run the gate is about 15°, so the 120° lobe of a hexagonal box cannot be followed; after a real loss it opens
+///    to ±180°, so the absolute angle can be re-acquired.
 ///
 /// When a strong match keeps contradicting a healthy geometry, it is the library that is wrong (the object was
 /// displaced, the light changed): `staleSeconds` builds up and the engine rebuilds it instead of fighting it.
@@ -88,19 +89,22 @@ public struct AngleFusion {
         var outcome = Outcome.noMeasurement
         lastMatchTrusted = false
         if !candidates.isEmpty {
-            let gate = min(3 * sigma, .pi)
+            // The gate is on the innovation covariance S = P + R, not on P alone: the measurement's own noise
+            // (about one bin) is part of what makes an innovation ordinary. Gating on P would, once the state is
+            // confident, reject normal measurements and then mistake them for a stale library.
+            func gate(_ c: Candidate) -> Double { min(3 * (sigma * sigma + Self.sigmaM(c) * Self.sigmaM(c)).squareRoot(), .pi) }
             let reference = theta + pending
             var bestInside: Candidate?
             var bestOverall: Candidate?
             for c in candidates {
                 if bestOverall == nil || c.score > bestOverall!.score { bestOverall = c }
-                if c.score > 0.55 && abs(wrapAngle(c.theta - reference)) < gate {
+                if c.score > 0.55 && abs(wrapAngle(c.theta - reference)) < gate(c) {
                     if bestInside == nil || c.score > bestInside!.score { bestInside = c }
                 }
             }
             if let inside = bestInside, let overall = bestOverall, overall.score <= inside.score + 0.05 {
                 let innovation = wrapAngle(inside.theta - reference)
-                let sigmaM = (5 * Double.pi / 180) / max(inside.score, 0.3)   // a sharp match is worth about one bin
+                let sigmaM = Self.sigmaM(inside)
                 let k = sigma * sigma / (sigma * sigma + sigmaM * sigmaM)
                 pending += k * innovation
                 sigma = ((1 - k) * sigma * sigma).squareRoot()
@@ -111,7 +115,7 @@ public struct AngleFusion {
                 // The measurement contradicts the state. Never follow it — and never let it creep in through a
                 // marginal candidate. Only a *strong* disagreement means the library itself is out of date.
                 if healthy, let overall = bestOverall, overall.score > 0.7,
-                   abs(wrapAngle(overall.theta - reference)) > gate {
+                   abs(wrapAngle(overall.theta - reference)) > gate(overall) {
                     staleSeconds += dt
                 }
                 outcome = bestInside == nil ? .gated : .ambiguous
@@ -123,6 +127,9 @@ public struct AngleFusion {
     }
 
     public mutating func clearStale() { staleSeconds = 0 }
+
+    /// Measurement noise of an appearance match: a sharp match is worth about one bin, a blurry one several.
+    private static func sigmaM(_ c: Candidate) -> Double { (5 * Double.pi / 180) / max(c.score, 0.3) }
 }
 
 /// Robust 2D rotation of a set of correspondences (Procrustes + IRLS).
