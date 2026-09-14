@@ -9,6 +9,8 @@ final class FrameConverter {
     static let engineHeight = 360
 
     private var scaled = [UInt8](repeating: 0, count: engineWidth * engineHeight)
+    /// 8-bit copy of the last downscaled luma image (for the recorder).
+    private(set) var lastLuma8 = [UInt8]()
     private var tempBuffer: UnsafeMutableRawPointer?
     private var tempBufferSize = 0
 
@@ -72,6 +74,7 @@ final class FrameConverter {
                 result = GrayImage(width: Self.engineWidth, height: Self.engineHeight, luma8: p, bytesPerRow: Self.engineWidth)
             }
         }
+        if result != nil { lastLuma8 = scaled }
         return result
     }
 

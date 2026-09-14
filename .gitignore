@@ -1,6 +1,8 @@
-Wiggler.xcodeproj/
+Wiggler.xcodeproj/project.xcworkspace/
+Wiggler.xcodeproj/xcuserdata/
 .build/
 DerivedData/
 *.xcuserstate
 xcuserdata/
 .DS_Store
+recordings/

@@ -79,20 +79,14 @@ struct ContentView: View {
 
     private var markerOverlay: some View {
         Canvas { ctx, _ in
-            let radiusPx = controller.roiFraction * Double(FrameConverter.engineHeight)
             var center: CGPoint?
-            var edge: CGPoint?
             if let d = dragPoint {
                 center = d
             } else if let m = controller.markerImagePoint {
                 center = controller.viewPoint(imageX: m.x, imageY: m.y)
-                edge = controller.viewPoint(imageX: m.x + radiusPx, imageY: m.y)
             }
             guard let c = center else { return }
-            let r: CGFloat = edge.map { hypot($0.x - c.x, $0.y - c.y) } ?? 40
-            var circle = Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r))
-            ctx.stroke(circle, with: .color(.cyan.opacity(0.8)), style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
-            circle = Path()
+            var circle = Path()
             circle.move(to: CGPoint(x: c.x - 12, y: c.y)); circle.addLine(to: CGPoint(x: c.x + 12, y: c.y))
             circle.move(to: CGPoint(x: c.x, y: c.y - 12)); circle.addLine(to: CGPoint(x: c.x, y: c.y + 12))
             ctx.stroke(circle, with: .color(.cyan), lineWidth: 2)
@@ -123,7 +117,10 @@ struct ContentView: View {
                 gauge("angle", o.angleConfidence, .orange)
                 gauge("aspect", o.relocalizerFill, .green)
             }
-            Text(String(format: "%d pts · %d ok · %d cordes · %.1f ms", o.trackCount, o.inlierCount, o.constraintCount, o.processingMillis))
+            Text(String(format: "%d pts · %d ok · %d cordes · %.1f ms · disp %.0f°", o.trackCount, o.inlierCount, o.constraintCount, o.processingMillis, o.angleDispersionDegrees))
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.white.opacity(0.6))
+            Text(controller.statsLine)
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(.white.opacity(0.6))
         }
@@ -173,12 +170,30 @@ struct ContentView: View {
     private var controls: some View {
         VStack(spacing: 10) {
             HStack {
-                Text("rayon").font(.caption)
-                Slider(value: $controller.roiFraction, in: 0.08...0.5)
-                Text(String(format: "%.0f %%", controller.roiFraction * 100)).font(.caption.monospacedDigit()).frame(width: 44)
-            }
-            HStack {
                 Toggle("points", isOn: $controller.showPoints).toggleStyle(.button)
+                Button {
+                    controller.toggleRecording()
+                } label: {
+                    let st = controller.recorderStatus
+                    if st.recording {
+                        Label(String(format: "Stop  %.0f s · %.0f Mo", st.seconds, st.megabytes), systemImage: "stop.circle.fill")
+                            .monospacedDigit()
+                    } else {
+                        Label("Enregistrer" + (controller.recordingCount > 0 ? " (\(controller.recordingCount))" : ""), systemImage: "record.circle")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(controller.recorderStatus.recording ? .red : .accentColor)
+                if controller.recordingCount > 0 && !controller.recorderStatus.recording {
+                    ShareLink(items: SessionRecorder.recordings()) {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                    .buttonStyle(.bordered)
+                    Button(role: .destructive) { controller.deleteRecordings() } label: {
+                        Image(systemName: "trash")
+                    }
+                    .buttonStyle(.bordered)
+                }
                 Spacer()
                 Button(role: .destructive) { controller.clearMarker() } label: {
                     Label("Réinitialiser", systemImage: "arrow.counterclockwise")

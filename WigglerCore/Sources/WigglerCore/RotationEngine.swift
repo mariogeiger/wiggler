@@ -107,6 +107,9 @@ public struct EngineOutput {
     public var constraintCount: Int = 0
     public var message: String = ""
     public var processingMillis: Double = 0
+    public var angleDispersionDegrees: Double = 0
+    public var relocalizerAnalysed = false
+    public var lastRelocalizationAge: Int = -1
     public init() {}
 }
 
@@ -123,7 +126,11 @@ public struct EngineConfig {
     public var axisUpdateInterval = 10
     public var constraintWindowFrames = 900
     public var sampleHistory = 90
-    public var lockedDriftFrames = 3      // consecutive inconsistent axis estimates before re-calibration
+    public var lockedDriftFrames = 3      // consecutive inconsistent axis estimates before adopting the new axis
+    public var axisConstraintCapacity = 24000
+    /// A track whose depth jumps by more than this fraction between consecutive samples is on a depth edge
+    /// (LiDAR bleeding from the background): the sample is skipped.
+    public var maxDepthJumpFraction = 0.08
     public var relocGain = 0.15
     public var relocJumpFrames = 6
     public var descriptorSide = 32
@@ -149,6 +156,8 @@ public final class RotationEngine {
         var lastChordFrame = -1000
         var radius = 0.0
         var height = 0.0
+        var lastDepth = 0.0
+        var depthRejects = 0
         init(id: Int, x: Float, y: Float) { self.id = id; self.x = x; self.y = y }
     }
 
@@ -185,6 +194,7 @@ public final class RotationEngine {
         self.reloc = Relocalizer(side: config.descriptorSide, binCount: config.keyframeBins)
         klt.halfWindow = 4
         corners.minDistance = 8
+        estimator.capacity = config.axisConstraintCapacity
     }
 
     // MARK: Marker
@@ -288,6 +298,12 @@ public final class RotationEngine {
             guard let depth = input.depth,
                   let z = depth.sample(u: Double(t.x) / w, v: Double(t.y) / h, minConfidence: config.minDepthConfidence)
             else { continue }
+            if t.lastDepth > 0 && abs(z - t.lastDepth) > config.maxDepthJumpFraction * t.lastDepth {
+                t.depthRejects += 1
+                if t.depthRejects < 4 { continue }   // persistent change: accept the new depth level
+            }
+            t.depthRejects = 0
+            t.lastDepth = z
             let xc = (Double(t.x) - K.cx) / K.fx * z
             let yc = (Double(t.y) - K.cy) / K.fy * z
             let cam = V3(xc, -yc, -z)  // ARKit camera space
@@ -407,7 +423,7 @@ public final class RotationEngine {
         }
         if state == .locked {
             var conf = min(1, Double(lastInlierCount) / 15.0)
-            conf *= max(0.2, 1 - lastDispersion / (12 * .pi / 180))
+            conf *= max(0.3, 1 - lastDispersion / (25 * .pi / 180))
             if reloc.analysed {
                 if reloc.isRotationallySymmetric {
                     conf *= 0.4
@@ -427,6 +443,9 @@ public final class RotationEngine {
             else { status = .good }
             return TrackDebug(x: t.x, y: t.y, status: status)
         }
+        out.angleDispersionDegrees = lastDispersion * 180 / .pi
+        out.relocalizerAnalysed = reloc.analysed
+        out.lastRelocalizationAge = lastRelocFrame < 0 ? -1 : frameIndex - lastRelocFrame
         out.message = statusMessage(out)
         out.processingMillis = Date().timeIntervalSince(t0) * 1000
         return out
@@ -449,8 +468,8 @@ public final class RotationEngine {
             let d = newAxis.origin - old.origin
             let perp = d - old.direction * d.dot(old.direction)
             let lineDistance = perp.length
-            let tolDist = max(0.02, 0.25 * objectRadius)
-            let consistent = angleBetween < 8 * .pi / 180 && lineDistance < tolDist
+            let tolDist = max(0.05, 0.5 * objectRadius)
+            let consistent = angleBetween < 12 * .pi / 180 && lineDistance < tolDist
             if state == .calibrating {
                 // Follow the estimate closely while calibrating.
                 blend(into: old, target: newAxis, alpha: 0.5)
@@ -461,10 +480,20 @@ public final class RotationEngine {
             } else {
                 inconsistentAxisCount += 1
                 if inconsistentAxisCount >= config.lockedDriftFrames {
-                    // The object or the axis moved: semi-static re-evaluation.
-                    restartCalibration()
-                    axis = newAxis
-                    rebaseAngle()
+                    inconsistentAxisCount = 0
+                    let farOff = angleBetween > 25 * .pi / 180 || lineDistance > max(0.15, 3 * objectRadius)
+                    if farOff {
+                        // The object was replaced / moved a lot: start over.
+                        restartCalibration()
+                        axis = newAxis
+                        rebaseAngle()
+                    } else {
+                        // Semi-static drift (chair rolled a little, axis re-estimated more precisely): adopt the new
+                        // axis while keeping the angle continuous; the appearance library is rebuilt.
+                        blend(into: old, target: newAxis, alpha: 0.7)
+                        reloc.reset()
+                        relocJump = nil
+                    }
                 }
             }
         } else {

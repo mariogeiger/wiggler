@@ -13,17 +13,35 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
     /// Marker in engine image coordinates (pixels of the 480x360 landscape image), nil when not placed.
     @Published private(set) var markerImagePoint: CGPoint?
     /// Region-of-interest radius as a fraction of the engine image height.
-    @Published var roiFraction: Double = 0.25 { didSet { applyMarker() } }
+    /// Region-of-interest radius (feature search area around the marker) as a fraction of the engine image height.
+    var roiFraction: Double = 0.35
     @Published var showPoints = true
     @Published var sessionMessage = ""
+    @Published private(set) var recorderStatus = SessionRecorder.Status(recording: false, seconds: 0, megabytes: 0, frames: 0, fileName: "")
+    @Published private(set) var recordingCount = SessionRecorder.recordings().count
+    /// Processed frame rate, dropped frames and camera format (debug line in the HUD).
+    @Published private(set) var statsLine = ""
 
     private let engine = RotationEngine()
     private let converter = FrameConverter()
+    private let recorder = SessionRecorder()
+    private var recordEveryNth = 2
+    private var frameCounter = 0
+    /// ARKit delivers frames here; conversion is quick and the ARFrame is released immediately.
     private let frameQueue = DispatchQueue(label: "ch.mariogeiger.wiggler.frames", qos: .userInteractive)
+    /// The engine runs here; frames arriving while it is busy are dropped (never queued) so ARKit is never starved.
+    private let engineQueue = DispatchQueue(label: "ch.mariogeiger.wiggler.engine", qos: .userInteractive)
+    private var engineBusy = false
+    private var droppedFrames = 0
+    private var processedFps = 0.0
+    private var lastProcessedTimestamp: Double?
+    private var formatDescription = ""
     private let overlay = AxisOverlayNode()
     private let lock = NSLock()
     private var latestOutput = EngineOutput()
     private var latestDisplayTransform = CGAffineTransform.identity
+    private var markerImagePointForFrameQueue: CGPoint?
+    private var roiRadiusForFrameQueue: Float = 0
     private var viewportSize = CGSize(width: 1, height: 1)
     private var lastPublish = Date.distantPast
 
@@ -58,6 +76,9 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
             ?? formats.first(where: { $0.framesPerSecond >= 60 }) {
             config.videoFormat = f
         }
+        let vf = config.videoFormat
+        formatDescription = "\(Int(vf.imageResolution.width))x\(Int(vf.imageResolution.height))@\(vf.framesPerSecond)"
+
         sceneView.session.run(config, options: [.resetTracking, .removeExistingAnchors])
     }
 
@@ -80,15 +101,37 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
         applyMarker()
     }
 
+    func toggleRecording() {
+        if recorder.isRecording {
+            recorder.stop()
+            recordingCount = SessionRecorder.recordings().count
+        } else {
+            recorder.start()
+        }
+        recorderStatus = recorder.status(now: 0)
+    }
+
+    func deleteRecordings() {
+        for u in SessionRecorder.recordings() { try? FileManager.default.removeItem(at: u) }
+        recordingCount = SessionRecorder.recordings().count
+    }
+
     func clearMarker() {
         markerImagePoint = nil
-        frameQueue.async { [engine] in engine.clearMarker() }
+        lock.lock()
+        markerImagePointForFrameQueue = nil
+        lock.unlock()
+        engineQueue.async { [engine] in engine.clearMarker() }
     }
 
     private func applyMarker() {
         guard let p = markerImagePoint else { return }
         let radius = Float(roiFraction * Double(FrameConverter.engineHeight))
-        frameQueue.async { [engine] in
+        lock.lock()
+        markerImagePointForFrameQueue = p
+        roiRadiusForFrameQueue = radius
+        lock.unlock()
+        engineQueue.async { [engine] in
             engine.setMarker(x: Float(p.x), y: Float(p.y), radius: radius)
         }
     }
@@ -112,23 +155,56 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
     // MARK: ARSessionDelegate (frame queue)
 
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
-        guard let input = converter.convert(frame) else { return }
         lock.lock()
+        let busy = engineBusy
+        if !busy { engineBusy = true }
         let size = viewportSize
         lock.unlock()
-        let transform = frame.displayTransform(for: .portrait, viewportSize: size)
-        var out = engine.process(input)
-        if frame.sceneDepth == nil && !out.message.isEmpty && out.state != .idle {
-            out.message = "Profondeur LiDAR absente — " + out.message
+        if busy {
+            droppedFrames += 1
+            return
         }
-        lock.lock()
-        latestOutput = out
-        latestDisplayTransform = transform
-        lock.unlock()
-        let now = Date()
-        if now.timeIntervalSince(lastPublish) > 1.0 / 30.0 {
-            lastPublish = now
-            DispatchQueue.main.async { [weak self] in self?.output = out }
+        guard let input = converter.convert(frame) else {
+            lock.lock(); engineBusy = false; lock.unlock()
+            return
+        }
+        let luma8 = converter.lastLuma8
+        let transform = frame.displayTransform(for: .portrait, viewportSize: size)
+        let hasDepth = frame.sceneDepth != nil
+        // Nothing below touches `frame` any more.
+        engineQueue.async { [self] in
+            if let lt = lastProcessedTimestamp, input.timestamp > lt {
+                let fps = 1.0 / (input.timestamp - lt)
+                processedFps += 0.1 * (fps - processedFps)
+            }
+            lastProcessedTimestamp = input.timestamp
+            var out = engine.process(input)
+            if !hasDepth && !out.message.isEmpty && out.state != .idle {
+                out.message = "Profondeur LiDAR absente — " + out.message
+            }
+            lock.lock()
+            latestOutput = out
+            latestDisplayTransform = transform
+            let marker = markerImagePointForFrameQueue
+            let roi = roiRadiusForFrameQueue
+            engineBusy = false
+            lock.unlock()
+            frameCounter += 1
+            if recorder.isRecording && frameCounter % recordEveryNth == 0 {
+                recorder.append(input: input, luma8: luma8, output: out, marker: marker, roiRadius: roi,
+                                droppedFrames: droppedFrames, processedFps: processedFps)
+            }
+            let stats = String(format: "%.0f fps traités · %d sautées · %@", processedFps, droppedFrames, formatDescription)
+            let now = Date()
+            if now.timeIntervalSince(lastPublish) > 1.0 / 30.0 {
+                lastPublish = now
+                let status = recorder.status(now: input.timestamp)
+                DispatchQueue.main.async { [weak self] in
+                    self?.output = out
+                    self?.recorderStatus = status
+                    self?.statsLine = stats
+                }
+            }
         }
     }
 

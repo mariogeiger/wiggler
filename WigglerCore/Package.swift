@@ -8,7 +8,11 @@ let package = Package(
         .library(name: "WigglerCore", targets: ["WigglerCore"])
     ],
     targets: [
-        .target(name: "WigglerCore"),
+        .target(
+            name: "WigglerCore",
+            // The tracker is CPU-bound; keep the optimiser on in Debug builds too (an unoptimised build is ~20x slower).
+            swiftSettings: [.unsafeFlags(["-O"], .when(configuration: .debug))]
+        ),
         .testTarget(name: "WigglerCoreTests", dependencies: ["WigglerCore"])
     ]
 )
