@@ -95,14 +95,14 @@ struct ContentView: View {
     private var pointCountControl: some View {
         HStack(spacing: 10) {
             Button {
-                controller.adjustTrackCount(by: -20)
+                controller.adjustTrackCount(by: -5)
             } label: {
                 Image(systemName: "minus").frame(width: 36, height: 36).contentShape(Rectangle())
             }
             Text("\(controller.targetTrackCount) pts").font(.caption.monospacedDigit()).foregroundStyle(
                 .white.opacity(0.8))
             Button {
-                controller.adjustTrackCount(by: 20)
+                controller.adjustTrackCount(by: 5)
             } label: {
                 Image(systemName: "plus").frame(width: 36, height: 36).contentShape(Rectangle())
             }

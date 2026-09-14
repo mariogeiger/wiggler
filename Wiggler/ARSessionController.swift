@@ -15,7 +15,7 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
         didSet { UserDefaults.standard.set(targetTrackCount, forKey: Self.trackCountKey) }
     }
     private static let trackCountKey = "targetTrackCount"
-    private static let trackCountRange = 20...400
+    private static let trackCountRange = 5...400
     /// Harmonics of the luma in the rotation angle that the map fits and the user can display.
     static let harmonicOrders = [1, 2, 3]
     /// Which harmonic of the current image is drawn over the camera image; nil = off. Persisted.
