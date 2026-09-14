@@ -171,7 +171,10 @@ struct ContentView: View {
             let st = controller.recorderStatus
             HStack(spacing: 6) {
                 Circle().fill(st.recording ? Color.red : Color.white.opacity(0.7)).frame(width: 14, height: 14)
-                if st.recording {
+                if controller.preparingRecordingShare {
+                    ProgressView().tint(.white)
+                    Text("Preparing…").font(.caption).foregroundStyle(.white)
+                } else if st.recording {
                     Text(String(format: "%.0f s", st.seconds)).font(.caption.monospacedDigit()).foregroundStyle(.white)
                 }
             }
@@ -179,6 +182,7 @@ struct ContentView: View {
             .background(.black.opacity(0.35), in: Capsule())
         }
         .buttonStyle(.plain)
+        .disabled(controller.preparingRecordingShare)
         .sheet(item: $controller.pendingShare) { item in
             // Export prompt opened automatically when a recording stops.
             ShareSheet(items: item.urls)

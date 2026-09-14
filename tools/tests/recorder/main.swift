@@ -6,8 +6,14 @@ func check(_ condition: Bool, _ message: String) throws {
     if !condition { throw TestFailure.failed(message) }
 }
 
+if CommandLine.arguments.count == 3 && CommandLine.arguments[1] == "--recompress" {
+    try RecordingFileCompression.recompress(at: URL(fileURLWithPath: CommandLine.arguments[2]))
+    exit(0)
+}
+
 let directory = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+try testFileCompression(in: directory)
 let recorder = SessionRecorder(directory: directory)
 let engine = RotationEngine()
 let intrinsics = CameraIntrinsics(fx: 40, fy: 40, cx: 24, cy: 18)
@@ -107,9 +113,13 @@ try check(recorder.status(now: 0).error != nil && recorder.status(now: 0).frames
 recorder.start(width: 48, height: 36, context: [:])
 try check(recorder.isRecording && recorder.status(now: 0).error == nil, "could not recover after error")
 recorder.stop()
+try RecordingFileCompression.recompress(at: firstURL)
+try RecordingFileCompression.recompress(at: largeURL)
+let exportedSize = try FileManager.default.attributesOfItem(atPath: largeURL.path)[.size] as! NSNumber
+try check(exportedSize.intValue <= size.intValue, "export grew the recording")
 let manifest: [String: Any] = [
     "warm": firstURL.lastPathComponent, "large": largeURL.lastPathComponent,
-    "failed": failedURL.lastPathComponent, "largeFrames": largeCount, "largeBytes": size, "compressible": compressible,
+    "failed": failedURL.lastPathComponent, "largeFrames": largeCount, "largeBytes": exportedSize, "compressible": compressible,
 ]
 try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
     .write(to: directory.appendingPathComponent("manifest.json"))

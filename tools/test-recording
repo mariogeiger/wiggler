@@ -11,7 +11,7 @@ memcap -h 4G -m 5G -s 0 docker run --rm --memory=4g --memory-swap=4g --cpus=2 \
         swiftc -O -enable-testing -emit-library -emit-module -module-name WigglerCore \
             WigglerCore/Sources/WigglerCore/*.swift -o /test/libWigglerCore.so -emit-module-path /test/WigglerCore.swiftmodule
         swiftc -O -I /test -I tools/tests/recorder/CZlib -L /test -lWigglerCore -Xlinker -rpath -Xlinker /test \
-            Wiggler/SessionRecorder.swift Wiggler/RecordingFrameMetadata.swift Wiggler/RecordingChunkCodec.swift tools/tests/recorder/*.swift -o /test/recorder-test
+            Wiggler/SessionRecorder.swift Wiggler/RecordingFrameMetadata.swift Wiggler/RecordingChunkCodec.swift Wiggler/RecordingFileCompression.swift tools/tests/recorder/*.swift -o /test/recorder-test
         /test/recorder-test /test/recordings
         /test/recorder-test /test/compressed --compressible
         swiftc -frontend -parse Wiggler/*.swift'
