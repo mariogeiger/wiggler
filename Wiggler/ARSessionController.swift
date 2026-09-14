@@ -159,10 +159,10 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
 
     func toggleRecording() {
         if recorder.isRecording {
-            let url = recorder.url
             recorder.stop()
+            let urls = recorder.sessionURLs
             recordingCount = SessionRecorder.recordings().count
-            if let u = url { pendingShare = ShareItem(url: u) }
+            if !urls.isEmpty { pendingShare = ShareItem(urls: urls) }
         } else {
             recorder.start()
         }

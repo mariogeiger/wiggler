@@ -242,14 +242,14 @@ struct ContentView: View {
         .buttonStyle(.plain)
         .sheet(item: $controller.pendingShare) { item in
             // Export prompt opened automatically when a recording stops.
-            ShareSheet(items: [item.url])
+            ShareSheet(items: item.urls)
         }
     }
 }
 
 struct ShareItem: Identifiable {
-    let url: URL
-    var id: String { url.path }
+    let urls: [URL]
+    var id: String { urls.map(\.path).joined(separator: "|") }
 }
 
 struct ShareSheet: UIViewControllerRepresentable {

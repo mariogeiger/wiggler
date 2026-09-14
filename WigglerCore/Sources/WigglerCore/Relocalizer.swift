@@ -71,6 +71,16 @@ public struct Relocalizer {
         raw[bin] = patch
     }
 
+    /// Blend a live patch into its bin (the object may have been displaced on its support): the library follows
+    /// the current appearance while older content still anchors it against slow drift.
+    public mutating func refresh(patch: [Float], theta: Double, alpha: Float) {
+        let bin = Int((positiveAngle(theta) / binWidth).rounded()) % binCount
+        guard analysed, var old = raw[bin], old.count == patch.count else { return }
+        for i in 0..<old.count { old[i] += alpha * (patch[i] - old[i]) }
+        raw[bin] = old
+        library[bin] = centred(old)
+    }
+
     private func centred(_ patch: [Float]) -> [Float] {
         var out = patch
         for i in 0..<out.count { out[i] -= meanPatch[i] }

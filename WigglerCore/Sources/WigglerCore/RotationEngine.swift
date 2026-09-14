@@ -133,6 +133,10 @@ public struct EngineConfig {
     public var maxDepthJumpFraction = 0.08
     public var relocGain = 0.15
     public var relocJumpFrames = 6
+    /// Jumps of the absolute angle are only allowed within this many frames after the geometric tracking recovered
+    /// from a loss; a long healthy streak means the appearance library is stale instead.
+    public var relocJumpGraceFrames = 180
+    public var relocRefreshAlpha: Float = 0.05
     public var descriptorSide = 32
     public var keyframeBins = 36
     public var lostAfterFrames = 45
@@ -188,6 +192,7 @@ public final class RotationEngine {
     private var lastInlierCount = 0
     private var lastDispersion = 0.0
     private var lastAngleOk = false
+    private var healthyStreak = 0
 
     public init(config: EngineConfig = EngineConfig()) {
         self.config = config
@@ -226,6 +231,7 @@ public final class RotationEngine {
         lastAngleOkFrame = -1000
         lastRelocFrame = -1000
         relocJump = nil
+        healthyStreak = 0
         rpmFiltered = 0
         lastInlierCount = 0
         lastAngleOk = false
@@ -552,6 +558,8 @@ public final class RotationEngine {
 
     private func relocalise(image: GrayImage, marker: (x: Float, y: Float, radius: Float), angleOk: Bool) {
         let patch = image.patch(centerX: marker.x, centerY: marker.y, halfSize: marker.radius, side: config.descriptorSide)
+        let healthy = angleOk && lastDispersion < 6 * .pi / 180 && lastInlierCount >= 20
+        healthyStreak = healthy ? healthyStreak + 1 : 0
         if !reloc.isComplete {
             if angleOk && lastDispersion < 6 * .pi / 180 && lastInlierCount >= 8 {
                 reloc.record(patch: patch, theta: angle.theta)
@@ -559,27 +567,38 @@ public final class RotationEngine {
             }
             return
         }
-        guard let m = reloc.match(patch: patch, nearTheta: angle.theta), m.confident else {
-            relocJump = nil
-            return
-        }
-        let err = wrapAngle(m.theta - angle.theta)
-        if abs(err) < 20 * .pi / 180 {
-            relocJump = nil
-            if angleOk { angle.shift(by: config.relocGain * err) }
-            lastRelocFrame = frameIndex
-        } else {
-            // Large disagreement (e.g. after an occlusion): require several consistent frames before jumping.
-            if let j = relocJump, abs(wrapAngle(j.target - m.theta)) < 10 * .pi / 180 {
-                relocJump = (m.theta, j.count + 1)
-                if j.count + 1 >= config.relocJumpFrames {
-                    angle.shift(by: err)
-                    relocJump = nil
-                    lastRelocFrame = frameIndex
+        let match = reloc.match(patch: patch, nearTheta: angle.theta)
+        if let m = match, m.confident {
+            let err = wrapAngle(m.theta - angle.theta)
+            if abs(err) < 20 * .pi / 180 {
+                // Normal regime: gently pull the integrated angle toward the appearance.
+                relocJump = nil
+                if angleOk { angle.shift(by: config.relocGain * err) }
+                lastRelocFrame = frameIndex
+            } else if healthyStreak < config.relocJumpGraceFrames {
+                // Large disagreement shortly after a tracking loss (hand, occlusion): the geometry re-anchored on a
+                // wrong angle — accept the appearance after several consistent frames.
+                if let j = relocJump, abs(wrapAngle(j.target - m.theta)) < 10 * .pi / 180 {
+                    relocJump = (m.theta, j.count + 1)
+                    if j.count + 1 >= config.relocJumpFrames {
+                        angle.shift(by: err)
+                        relocJump = nil
+                        lastRelocFrame = frameIndex
+                    }
+                } else {
+                    relocJump = (m.theta, 1)
                 }
             } else {
-                relocJump = (m.theta, 1)
+                // Geometry has been healthy for a long time: the library is what is wrong (object displaced on its
+                // support, lighting…). Do not jump; the refresh below re-aligns the library.
+                relocJump = nil
             }
+        } else {
+            relocJump = nil
+        }
+        // Keep the library aligned with the current appearance while the geometry is trustworthy.
+        if healthy {
+            reloc.refresh(patch: patch, theta: angle.theta, alpha: config.relocRefreshAlpha)
         }
     }
 

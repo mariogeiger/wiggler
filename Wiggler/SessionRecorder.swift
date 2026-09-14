@@ -12,6 +12,8 @@ final class SessionRecorder {
     private let queue = DispatchQueue(label: "ch.mariogeiger.wiggler.recorder", qos: .utility)
     private var handle: FileHandle?
     private(set) var url: URL?
+    /// All files of the current/last session (a session is split in ~250 MB parts).
+    private(set) var sessionURLs: [URL] = []
     private var startTime: Double?
     private var written: Int64 = 0
     private var frames = 0
@@ -42,6 +44,7 @@ final class SessionRecorder {
         let f = DateFormatter()
         f.dateFormat = "yyyyMMdd-HHmmss"
         sessionName = "wiggler-" + f.string(from: Date())
+        sessionURLs = []
         fileIndex = 0
         frames = 0
         startTime = nil
@@ -56,6 +59,7 @@ final class SessionRecorder {
         guard let h = try? FileHandle(forWritingTo: u) else { return }
         handle = h
         url = u
+        sessionURLs.append(u)
         written = 0
         fileIndex += 1
         let header: [String: Any] = ["version": 1, "width": FrameConverter.engineWidth, "height": FrameConverter.engineHeight,
