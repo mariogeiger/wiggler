@@ -82,6 +82,12 @@ pre-commit run --all-files
 Point colors: green = tracking consistent with rotation, red = inconsistent (hands, background),
 yellow = no depth, white = new.
 
+Controls sit in two columns just below the top safe area (below the Dynamic Island on supported iPhones).
+The left column has harmonic-order buttons above harmonic-input buttons. The right column has point-count
+buttons and Record, with elapsed seconds while recording. One line below shows angle, rpm, and harmonic
+progress while accumulating; it stays blank when no measurement is available. Controls keep their
+intrinsic sizes; outer margins give way when the controls need the width. The camera and AR overlays remain full-screen.
+
 The harmonic input buttons, below the harmonic-order row, select **Y** (luma / brightness, the default),
 **Cr** (red chroma, red relative to luminance), **Cb** (blue chroma, blue relative to luminance),
 or **Depth** (LiDAR depth in meters).

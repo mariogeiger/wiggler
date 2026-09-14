@@ -18,47 +18,46 @@ struct ContentView: View {
     @StateObject private var controller = ARSessionController()
 
     var body: some View {
-        GeometryReader { geo in
-            ZStack {
-                ARViewContainer(controller: controller)
+        GeometryReader { safeArea in
+            GeometryReader { viewport in
+                ZStack(alignment: .top) {
+                    ARViewContainer(controller: controller)
 
-                pointsOverlay
-                    .allowsHitTesting(false)
+                    pointsOverlay
+                        .allowsHitTesting(false)
 
-                // Everything lives at the top so the hand turning the object never covers a control.
-                VStack(spacing: 10) {
-                    HStack(alignment: .top) {
-                        rpmText
-                        Spacer()
-                        angleText
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 56)
-                    HStack {
-                        pointCountControl
-                        Spacer()
-                        recordButton
-                    }
-                    .padding(.horizontal, 20)
-                    HStack {
-                        harmonicControl
-                        Spacer()
-                    }
-                    .padding(.horizontal, 20)
-                    HStack {
-                        harmonicSignalControl
-                        Spacer()
-                    }
-                    .padding(.horizontal, 20)
-                    Spacer()
+                    controls
+                        .padding(.top, safeArea.safeAreaInsets.top + 4)
                 }
+                .onAppear { controller.updateViewportSize(viewport.size) }
+                .onChange(of: viewport.size) { _, size in controller.updateViewportSize(size) }
             }
-            .onAppear { controller.updateViewportSize(geo.size) }
-            .onChange(of: geo.size) { _, s in controller.updateViewportSize(s) }
+            .ignoresSafeArea()
         }
-        .ignoresSafeArea()
         .onAppear { controller.start() }
         .onDisappear { controller.pause() }
+    }
+
+    private var controls: some View {
+        FittingHorizontalPadding(maximum: 8) {
+            Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 8) {
+                GridRow {
+                    harmonicControl.fixedSize()
+                    Spacer(minLength: 0).gridCellUnsizedAxes(.vertical)
+                    HStack(spacing: 0) {
+                        pointCountControl
+                        recordButton
+                    }
+                    .fixedSize()
+                    .gridColumnAlignment(.trailing)
+                }
+                GridRow {
+                    harmonicSignalControl.fixedSize()
+                    Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])
+                    measurementLine.gridCellUnsizedAxes(.horizontal)
+                }
+            }
+        }
     }
 
     // MARK: Overlays
@@ -83,18 +82,21 @@ struct ContentView: View {
 
     // MARK: Readouts and controls
 
-    private var rpmText: some View {
-        let o = controller.output
-        return Text(o.state == .locked ? String(format: "%+.0f rpm", o.rpm) : "")
+    private var measurementLine: some View {
+        let output = controller.output
+        var fields = [String]()
+        if output.state == .locked, output.angleConfidence > 0 {
+            fields.append(String(format: "%.0f°", output.angleDegrees))
+            fields.append(String(format: "%+.0f rpm", output.rpm))
+            if controller.harmonicOrder != nil, controller.harmonicProgress < 1 {
+                fields.append("\(Int(controller.harmonicProgress * 100)) %")
+            }
+        }
+        return Text(fields.isEmpty ? " " : fields.joined(separator: " · "))
             .font(.caption.monospacedDigit())
             .foregroundStyle(.white.opacity(0.8))
-    }
-
-    private var angleText: some View {
-        let o = controller.output
-        return Text(o.state == .locked && o.angleConfidence > 0 ? String(format: "%.0f°", o.angleDegrees) : "")
-            .font(.caption.monospacedDigit())
-            .foregroundStyle(.white.opacity(0.8))
+            .lineLimit(1)
+            .accessibilityHidden(fields.isEmpty)
     }
 
     private var pointCountControl: some View {
@@ -139,13 +141,6 @@ struct ContentView: View {
         HStack(spacing: 2) {
             harmonicButton(nil, "off")
             ForEach(ARSessionController.harmonicOrders, id: \.self) { harmonicButton($0, "l=\($0)") }
-            if controller.harmonicOrder != nil, controller.output.state == .locked, controller.harmonicProgress < 1 {
-                // First turn not yet accumulated: the overlay appears at 100 %.
-                Text("\(Int(controller.harmonicProgress * 100)) %")
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.white.opacity(0.6))
-                    .padding(.horizontal, 6)
-            }
         }
         .padding(3)
         .background(.black.opacity(0.35), in: Capsule())
@@ -200,6 +195,33 @@ struct ContentView: View {
         } message: {
             Text(controller.recordingError ?? "")
         }
+    }
+}
+
+/// Spend spare width on outer margins, never by shrinking the controls inside them.
+private struct FittingHorizontalPadding: Layout {
+    let maximum: CGFloat
+
+    private func inset(width: CGFloat?, content: LayoutSubview) -> CGFloat {
+        guard let width else { return maximum }
+        let minimumWidth = content.sizeThatFits(.unspecified).width
+        return min(maximum, max(0, (width - minimumWidth) / 2))
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        precondition(subviews.count == 1)
+        let padding = inset(width: proposal.width, content: subviews[0])
+        let size = subviews[0].sizeThatFits(
+            ProposedViewSize(width: proposal.width.map { max(0, $0 - 2 * padding) }, height: proposal.height))
+        return CGSize(width: size.width + 2 * padding, height: size.height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        precondition(subviews.count == 1)
+        let padding = inset(width: bounds.width, content: subviews[0])
+        subviews[0].place(
+            at: CGPoint(x: bounds.minX + padding, y: bounds.minY), anchor: .topLeading,
+            proposal: ProposedViewSize(width: max(0, bounds.width - 2 * padding), height: bounds.height))
     }
 }
 
