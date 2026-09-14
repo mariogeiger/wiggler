@@ -49,7 +49,7 @@ final class ImageOverlayUIView: UIView {
     }
 }
 
-struct DipoleOverlay: UIViewRepresentable {
+struct ImageOverlay: UIViewRepresentable {
     let controller: ARSessionController
     let image: CGImage?
 
@@ -69,16 +69,5 @@ extension CGImage {
                        space: CGColorSpaceCreateDeviceRGB(),
                        bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue),
                        provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
-    }
-}
-
-extension DipoleMap.Display {
-    var label: String {
-        switch self {
-        case .current: return "now"
-        case .fixed: return "θ=0"
-        case .magnitude: return "|c₁|"
-        case .phase: return "∠c₁"
-        }
     }
 }

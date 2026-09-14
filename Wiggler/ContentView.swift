@@ -22,7 +22,7 @@ struct ContentView: View {
             ZStack {
                 ARViewContainer(controller: controller)
 
-                DipoleOverlay(controller: controller, image: controller.dipoleImage)
+                ImageOverlay(controller: controller, image: controller.harmonicImage)
                     .allowsHitTesting(false)
                 pointsOverlay
                     .allowsHitTesting(false)
@@ -52,7 +52,7 @@ struct ContentView: View {
                     }
                     .padding(.horizontal, 20)
                     HStack {
-                        dipoleControl
+                        harmonicControl
                         Spacer()
                     }
                     .padding(.horizontal, 20)
@@ -138,14 +138,14 @@ struct ContentView: View {
         .background(.black.opacity(0.35), in: Capsule())
     }
 
-    /// Which view of the per-pixel dipole is drawn (see `DipoleMap.Display`).
-    private var dipoleControl: some View {
+    /// Which harmonic of the current image is drawn (see `HarmonicMap`).
+    private var harmonicControl: some View {
         HStack(spacing: 2) {
-            dipoleButton(nil, "off")
-            ForEach(DipoleMap.Display.allCases, id: \.self) { dipoleButton($0, $0.label) }
-            if controller.dipoleDisplay != nil, controller.output.state == .locked, controller.dipoleProgress < 1 {
+            harmonicButton(nil, "off")
+            ForEach(ARSessionController.harmonicOrders, id: \.self) { harmonicButton($0, "l=\($0)") }
+            if controller.harmonicOrder != nil, controller.output.state == .locked, controller.harmonicProgress < 1 {
                 // First turn not yet accumulated: the overlay appears at 100 %.
-                Text("\(Int(controller.dipoleProgress * 100)) %")
+                Text("\(Int(controller.harmonicProgress * 100)) %")
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.white.opacity(0.6))
                     .padding(.horizontal, 6)
@@ -155,9 +155,9 @@ struct ContentView: View {
         .background(.black.opacity(0.35), in: Capsule())
     }
 
-    private func dipoleButton(_ d: DipoleMap.Display?, _ label: String) -> some View {
-        let selected = controller.dipoleDisplay == d
-        return Button { controller.setDipoleDisplay(d) } label: {
+    private func harmonicButton(_ l: Int?, _ label: String) -> some View {
+        let selected = controller.harmonicOrder == l
+        return Button { controller.setHarmonicOrder(l) } label: {
             Text(label)
                 .font(.caption2.monospaced())
                 .foregroundStyle(selected ? .black : .white.opacity(0.8))

@@ -19,15 +19,17 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
     }
     private static let trackCountKey = "targetTrackCount"
     private static let trackCountRange = 20...400
-    /// Which real quantity of the per-pixel dipole c₁ is drawn over the camera image; nil = off. Persisted.
-    @Published private(set) var dipoleDisplay: DipoleMap.Display? {
-        didSet { UserDefaults.standard.set((dipoleDisplay?.rawValue ?? -1) + 1, forKey: Self.dipoleDisplayKey) }
+    /// Harmonics of the luma in the rotation angle that the map fits and the user can display.
+    static let harmonicOrders = [1, 2, 3]
+    /// Which harmonic of the current image is drawn over the camera image; nil = off. Persisted.
+    @Published private(set) var harmonicOrder: Int? {
+        didSet { UserDefaults.standard.set(harmonicOrder ?? 0, forKey: Self.harmonicOrderKey) }
     }
-    private static let dipoleDisplayKey = "dipoleDisplay"
-    /// Latest rendered dipole overlay (engine image size), nil when hidden.
-    @Published private(set) var dipoleImage: CGImage?
-    /// Fraction of the first full turn the dipole map has accumulated (it is drawn from 1).
-    @Published private(set) var dipoleProgress = 0.0
+    private static let harmonicOrderKey = "harmonicOrder"
+    /// Latest rendered harmonic overlay (engine image size), nil when hidden.
+    @Published private(set) var harmonicImage: CGImage?
+    /// Fraction of the first full turn the harmonic map has accumulated (it is drawn from 1).
+    @Published private(set) var harmonicProgress = 0.0
     @Published private(set) var recorderStatus = SessionRecorder.Status(recording: false, seconds: 0, megabytes: 0, frames: 0, fileName: "")
     /// Set when a recording stops: the view presents the export sheet for it.
     @Published var pendingShare: ShareItem?
@@ -55,16 +57,18 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
     private var latestDisplayTransform = CGAffineTransform.identity
     private var viewportSize = CGSize(width: 1, height: 1)
     private var lastPublish = Date.distantPast
-    // Dipole map (engine queue). It accumulates whenever the angle is tracked, so switching the display on is instant.
-    private var dipole = DipoleMap(width: FrameConverter.engineWidth, height: FrameConverter.engineHeight)
-    private var dipoleDisplayEngine: DipoleMap.Display?
-    /// The dipole overlay is on screen (engine queue; mirrored under `lock` for the render thread, which then
+    // Harmonic map (engine queue). It accumulates whenever the angle is tracked, so switching the display on is
+    // instant.
+    private var harmonics = HarmonicMap(width: FrameConverter.engineWidth, height: FrameConverter.engineHeight,
+                                        orders: ARSessionController.harmonicOrders)
+    private var harmonicOrderEngine: Int?
+    /// The harmonic overlay is on screen (engine queue; mirrored under `lock` for the render thread, which then
     /// withdraws the axis and ray so the colours are not drawn over).
-    private var dipoleShown = false
-    private var dipoleShownForRender = false
-    private var lastDipoleRender = Date.distantPast
+    private var harmonicShown = false
+    private var harmonicShownForRender = false
+    private var lastHarmonicRender = Date.distantPast
     /// Fully opaque at this luma modulation (20 of 255 levels).
-    private let dipoleFullScale: Float = 20 / 255
+    private let harmonicFullScale: Float = 20 / 255
 
     override init() {
         super.init()
@@ -79,9 +83,9 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
         let saved = UserDefaults.standard.integer(forKey: Self.trackCountKey)
         if saved != 0 { targetTrackCount = Self.clampTrackCount(saved) }
         engine.config.targetTrackCount = targetTrackCount
-        let savedDisplay = UserDefaults.standard.integer(forKey: Self.dipoleDisplayKey)
-        dipoleDisplay = savedDisplay > 0 ? DipoleMap.Display(rawValue: savedDisplay - 1) : nil
-        dipoleDisplayEngine = dipoleDisplay
+        let savedOrder = UserDefaults.standard.integer(forKey: Self.harmonicOrderKey)
+        harmonicOrder = Self.harmonicOrders.contains(savedOrder) ? savedOrder : nil
+        harmonicOrderEngine = harmonicOrder
     }
 
     private static func clampTrackCount(_ n: Int) -> Int {
@@ -135,9 +139,9 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
         engineQueue.async { [engine] in engine.config.targetTrackCount = n }
     }
 
-    func setDipoleDisplay(_ d: DipoleMap.Display?) {
-        dipoleDisplay = d
-        engineQueue.async { [self] in dipoleDisplayEngine = d }
+    func setHarmonicOrder(_ l: Int?) {
+        harmonicOrder = l
+        engineQueue.async { [self] in harmonicOrderEngine = l }
     }
 
     func toggleRecording() {
@@ -198,7 +202,7 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
             }
             lastProcessedTimestamp = input.timestamp
             let out = engine.process(input)
-            updateDipole(input: input, output: out)
+            updateHarmonics(input: input, output: out)
             lock.lock()
             latestOutput = out
             latestDisplayTransform = transform
@@ -215,10 +219,10 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
             if now.timeIntervalSince(lastPublish) > 1.0 / 30.0 {
                 lastPublish = now
                 let status = recorder.status(now: input.timestamp)
-                let progress = dipole.turnProgress
+                let progress = harmonics.turnProgress
                 DispatchQueue.main.async { [weak self] in
                     self?.output = out
-                    self?.dipoleProgress = progress
+                    self?.harmonicProgress = progress
                     self?.markerImagePoint = out.marker.map { CGPoint(x: CGFloat($0.x), y: CGFloat($0.y)) }
                     self?.recorderStatus = status
                 }
@@ -226,27 +230,27 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
         }
     }
 
-    /// Engine queue. Feeds the dipole map and publishes its rendering at ≤ 15 Hz while it is meaningful.
-    private func updateDipole(input: FrameInput, output out: EngineOutput) {
+    /// Engine queue. Feeds the harmonic map and publishes its rendering at ≤ 15 Hz while it is meaningful.
+    private func updateHarmonics(input: FrameInput, output out: EngineOutput) {
         switch out.state {
-        case .locked: dipole.add(image: input.image, theta: out.theta)
-        case .lost: break                      // the angle is held, not measured: neither add nor forget
-        case .idle, .calibrating: dipole.reset()  // the angle reference is about to change
+        case .locked: harmonics.add(image: input.image, theta: out.theta)
+        case .lost: break                         // the angle is held, not measured: neither add nor forget
+        case .idle, .calibrating: harmonics.reset()  // the angle reference is about to change
         }
         let now = Date()
-        let show = dipoleDisplayEngine != nil && out.state == .locked && dipole.hasFullTurn
+        let show = harmonicOrderEngine != nil && out.state == .locked && harmonics.hasFullTurn
         if show {
-            guard now.timeIntervalSince(lastDipoleRender) > 1.0 / 15.0, let display = dipoleDisplayEngine,
-                  let rgba = dipole.render(display, theta: out.theta, fullScale: dipoleFullScale) else { return }
-            lastDipoleRender = now
-            let image = CGImage.rgba8(width: dipole.width, height: dipole.height, bytes: rgba)
-            dipoleShown = image != nil
-            lock.lock(); dipoleShownForRender = dipoleShown; lock.unlock()
-            DispatchQueue.main.async { [weak self] in self?.dipoleImage = image }
-        } else if dipoleShown {
-            dipoleShown = false
-            lock.lock(); dipoleShownForRender = false; lock.unlock()
-            DispatchQueue.main.async { [weak self] in self?.dipoleImage = nil }
+            guard now.timeIntervalSince(lastHarmonicRender) > 1.0 / 15.0, let l = harmonicOrderEngine,
+                  let rgba = harmonics.render(order: l, theta: out.theta, fullScale: harmonicFullScale) else { return }
+            lastHarmonicRender = now
+            let image = CGImage.rgba8(width: harmonics.width, height: harmonics.height, bytes: rgba)
+            harmonicShown = image != nil
+            lock.lock(); harmonicShownForRender = harmonicShown; lock.unlock()
+            DispatchQueue.main.async { [weak self] in self?.harmonicImage = image }
+        } else if harmonicShown {
+            harmonicShown = false
+            lock.lock(); harmonicShownForRender = false; lock.unlock()
+            DispatchQueue.main.async { [weak self] in self?.harmonicImage = nil }
         }
     }
 
@@ -255,7 +259,7 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
     func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
         lock.lock()
         let out = latestOutput
-        let hidden = dipoleShownForRender
+        let hidden = harmonicShownForRender
         lock.unlock()
         overlay.update(with: out, hidden: hidden)
     }
