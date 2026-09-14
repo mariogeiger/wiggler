@@ -25,7 +25,7 @@ targets:
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         UIRequiredDeviceCapabilities: [arkit, arm64]
-        NSCameraUsageDescription: "La caméra et le LiDAR servent à mesurer la rotation de l'objet."
+        NSCameraUsageDescription: "The camera and LiDAR are used to measure the object's rotation."
         UIRequiresFullScreen: true
         ITSAppUsesNonExemptEncryption: false
     settings:
