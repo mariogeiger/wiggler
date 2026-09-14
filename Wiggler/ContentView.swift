@@ -41,6 +41,7 @@ struct ContentView: View {
                     }
                     .padding(.horizontal, 20)
                     HStack {
+                        harmonicSignalControl
                         harmonicControl
                         Spacer()
                     }
@@ -111,6 +112,33 @@ struct ContentView: View {
         .foregroundStyle(.white.opacity(0.8))
         .padding(.horizontal, 6)
         .background(.black.opacity(0.35), in: Capsule())
+    }
+
+    private var harmonicSignalControl: some View {
+        Menu {
+            ForEach(HarmonicSignal.allCases, id: \.self) { signal in
+                Button {
+                    controller.setHarmonicSignal(signal)
+                } label: {
+                    if controller.harmonicSignal == signal {
+                        Label(signal.label, systemImage: "checkmark")
+                    } else {
+                        Text(signal.label)
+                    }
+                }
+                .disabled(signal == .depth && !ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth))
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(controller.harmonicSignal.shortLabel)
+                Image(systemName: "chevron.down").font(.system(size: 8))
+            }
+            .font(.caption2.monospaced())
+            .foregroundStyle(.white.opacity(0.8))
+            .padding(.horizontal, 10).padding(.vertical, 9)
+            .background(.black.opacity(0.35), in: Capsule())
+        }
+        .accessibilityLabel("Harmonic input: \(controller.harmonicSignal.label)")
     }
 
     /// Which harmonic of the current image is drawn (see `HarmonicMap`).

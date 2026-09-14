@@ -1,7 +1,7 @@
 import SceneKit
 import UIKit
 
-/// Composites an engine-sized image over the camera feed, below the world-space axis and ray.
+/// Composites a camera-aligned image of any resolution below the world-space axis and ray.
 final class HarmonicOverlayNode: SCNNode {
     private let material = SCNMaterial()
     private let triangles = SCNGeometryElement(indices: [UInt16(0), 1, 2, 2, 1, 3], primitiveType: .triangles)

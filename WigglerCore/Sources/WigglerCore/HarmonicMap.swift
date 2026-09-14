@@ -1,15 +1,14 @@
 import Foundation
 
-/// Per-pixel lock-in detection of chosen Fourier harmonics l of the luma as a function of the rotation angle.
+/// Per-pixel lock-in detection of chosen Fourier harmonics l of a scalar signal as a function of the rotation angle.
 ///
-/// Every pixel's luma is fitted by weighted least squares on the basis {1, θ−θ_now, cos lθ, sin lθ for l in
+/// Every pixel's signal is fitted by weighted least squares on the basis {1, θ−θ_now, cos lθ, sin lθ for l in
 /// `orders`} over the recent history. The trend term absorbs exposure and lighting ramps, which would otherwise leak
 /// into the low harmonics; fitting all orders jointly removes the cross-talk an irregular, windowed sampling puts
 /// between them. The window is an exponential in *angle* — a frame weighs |Δθ| and the past decays as e^{−|Δθ|/Θ}
 /// — so a stopped object neither adds to nor forgets its map, and the coefficients are genuine Fourier coefficients
-/// however irregular the rotation. The normal matrix depends only on the angle samples and is shared by all pixels;
-/// each pixel keeps its right-hand sides, one plane per basis term, so a frame costs one multiply-add per term per
-/// pixel and no frame is ever stored.
+/// however irregular the rotation. Complete observations share one normal matrix. Non-finite samples are ignored,
+/// with separate normal matrices for each pixel's valid observations. No frame is ever stored.
 ///
 /// For a pixel on the object, I(θ) = L(φ − θ) gives c_l = L̂_l e^{ilφ}: the phase is l times the pixel's azimuth
 /// around the axis and the magnitude the l-th harmonic of the texture at that height.
@@ -23,35 +22,36 @@ public struct HarmonicMap {
     /// Basis size: 1, τ, then (cos, sin) per order.
     private let terms: Int
 
-    /// Shared moments N = Σ w φφᵀ, φ = (1, τ, cos l₁θ, sin l₁θ, …), τ = θ − θ_now; row-major terms × terms.
-    private var moments: [Double]
+    private var moments: HarmonicMoments
     /// Per-pixel right-hand sides Σ w I φ: `terms` planes of width × height, in basis order.
     private var acc: [Float]
     private var thetaPrev: Double?
 
     public init(width: Int, height: Int, orders: [Int] = [1], windowTurns: Double = 3) {
+        precondition(width > 0 && height > 0 && windowTurns > 0 && windowTurns.isFinite)
         precondition(!orders.isEmpty && orders.allSatisfy { $0 >= 1 } && Set(orders).count == orders.count)
         self.width = width
         self.height = height
         self.window = windowTurns * 2 * .pi
         self.orders = orders
         self.terms = 2 + 2 * orders.count
-        self.moments = [Double](repeating: 0, count: terms * terms)
+        self.moments = HarmonicMoments(terms: terms, pixelCount: width * height)
         self.acc = [Float](repeating: 0, count: terms * width * height)
     }
 
     public mutating func reset() {
-        for i in 0..<moments.count { moments[i] = 0 }
+        moments.reset()
         for i in 0..<acc.count { acc[i] = 0 }
         thetaPrev = nil
     }
 
     /// Total weight in the window as a fraction of its e-folding length (→ 1 after many turns).
-    public var fill: Double { moments[0] / window }
+    public var fill: Double { moments.maximumWeight / window }
     /// Progress towards one full turn of accumulated angle, 0…1. Below 1 the coefficients would be extrapolated
     /// from an arc, not measured; above, the speed no longer matters.
-    public var turnProgress: Double { min(1, moments[0] / (window * (1 - exp(-2 * .pi / window)))) }
+    public var turnProgress: Double { min(1, moments.maximumWeight / fullTurnWeight) }
     public var hasFullTurn: Bool { turnProgress >= 1 }
+    private var fullTurnWeight: Double { window * (1 - exp(-2 * .pi / window)) }
 
     /// Accumulate only a stable measurement. Invalidation discards both the fit and the angle reference.
     public mutating func update(image: GrayImage, output: EngineOutput) {
@@ -78,6 +78,10 @@ public struct HarmonicMap {
     @discardableResult
     public mutating func add(image: GrayImage, theta: Double) -> Bool {
         precondition(image.width == width && image.height == height)
+        guard theta.isFinite else {
+            reset()
+            return false
+        }
         guard let prev = thetaPrev else {
             thetaPrev = theta
             return true
@@ -93,13 +97,8 @@ public struct HarmonicMap {
         let lam = exp(-w / window)
         let phi = basis(theta: theta)
         let t = terms
-        // Every past sample's τ shifts by −Δθ: φ ← Aφ with A = I − Δθ e_τ e_1ᵀ, so N ← A N Aᵀ (row τ, then
-        // column τ, the Δθ² term falling out of the second step) and r ← A r. Then decay and add the new sample.
-        for j in 0..<t { moments[t + j] -= dth * moments[j] }
-        for i in 0..<t { moments[i * t + 1] -= dth * moments[i * t] }
-        for i in 0..<t {
-            for j in 0..<t { moments[i * t + j] = lam * moments[i * t + j] + w * phi[i] * phi[j] }
-        }
+        let valid = image.pixels.allSatisfy(\.isFinite) ? nil : image.pixels.map(\.isFinite)
+        moments.add(basis: phi, delta: dth, decay: lam, weight: w, valid: valid)
 
         let n = width * height
         let lamF = Float(lam), dthF = Float(dth)
@@ -109,76 +108,45 @@ public struct HarmonicMap {
                 for i in 0..<n { rT[i] = lamF * (rT[i] - dthF * r0[i]) }
                 for k in 0..<t where k != 1 {
                     let r = r0 + k * n, wk = Float(w * phi[k])
-                    for i in 0..<n { r[i] = lamF * r[i] + wk * img[i] }
+                    for i in 0..<n { r[i] = lamF * r[i] + (img[i].isFinite ? wk * img[i] : 0) }
                 }
             }
         }
         return true
     }
 
-    /// The inverse normal matrix; nil while singular.
-    private func inverseMoments() -> [[Double]]? {
-        let t = terms
-        var m = (0..<t).map { i -> [Double] in
-            let row = (0..<t).map { moments[i * t + $0] }
-            let identity = (0..<t).map { i == $0 ? 1.0 : 0.0 }
-            return row + identity
-        }
-        let tiny = 1e-12 * (0..<t).reduce(0) { $0 + moments[$1 * t + $1] }
-        for col in 0..<t {
-            var pivot = col
-            for r in col + 1..<t where abs(m[r][col]) > abs(m[pivot][col]) { pivot = r }
-            if abs(m[pivot][col]) <= tiny { return nil }
-            m.swapAt(col, pivot)
-            let inv = 1 / m[col][col]
-            for j in 0..<2 * t { m[col][j] *= inv }
-            for r in 0..<t where r != col {
-                let f = m[r][col]
-                if f != 0 { for j in 0..<2 * t { m[r][j] -= f * m[col][j] } }
-            }
-        }
-        return m.map { Array($0[t..<2 * t]) }
+    private func weights(order: Int, cosine: Double, sine: Double) -> [Double]? {
+        guard hasFullTurn, let k = orders.firstIndex(of: order) else { return nil }
+        var weights = [Double](repeating: 0, count: terms)
+        weights[2 + 2 * k] = cosine
+        weights[3 + 2 * k] = sine
+        return weights
     }
 
-    /// Rows of the inverse normal matrix giving the cos lθ and sin lθ coefficients; nil while undetermined.
-    private func rows(order l: Int) -> (a: [Double], b: [Double])? {
-        guard hasFullTurn, let k = orders.firstIndex(of: l), let inv = inverseMoments() else { return nil }
-        return (inv[2 + 2 * k], inv[3 + 2 * k])
-    }
-
-    /// gᵀ r at every pixel, g in basis order.
-    private func project(_ g: [Double]) -> [Float] {
-        let n = width * height
-        var out = [Float](repeating: 0, count: n)
-        acc.withUnsafeBufferPointer { r in
-            out.withUnsafeMutableBufferPointer { o in
-                for k in 0..<terms {
-                    let rk = r.baseAddress! + k * n, gk = Float(g[k])
-                    for i in 0..<n { o[i] += gk * rk[i] }
-                }
-            }
-        }
-        return out
-    }
-
-    /// The coefficients (a, b) of cos lθ and sin lθ, luma units, at every pixel — c_l = a − i b; nil while
+    /// The coefficients (a, b) of cos lθ and sin lθ, signal units, at every pixel — c_l = a − i b; nil while
     /// undetermined.
     public func coefficients(order l: Int) -> (a: [Float], b: [Float])? {
-        guard let g = rows(order: l) else { return nil }
-        return (project(g.a), project(g.b))
+        guard let a = weights(order: l, cosine: 1, sine: 0), let b = weights(order: l, cosine: 0, sine: 1) else {
+            return nil
+        }
+        return (
+            moments.project(rhs: acc, weights: a, minimumWeight: fullTurnWeight),
+            moments.project(rhs: acc, weights: b, minimumWeight: fullTurnWeight)
+        )
     }
 
     /// Premultiplied RGBA8 overlay of the l-th harmonic of the current image, a cos lθ + b sin lθ, which turns with
-    /// the object: blue → 0 → red, fully opaque at |value| = `fullScale` (luma units). Nil while undetermined.
+    /// the object: blue → 0 → red, fully opaque at |value| = `fullScale` (signal units). Nil while undetermined.
     public func render(order l: Int, theta: Double, fullScale: Float) -> [UInt8]? {
-        guard let g = rows(order: l) else { return nil }
-        let c = cos(Double(l) * theta), s = sin(Double(l) * theta)
-        let v = project((0..<terms).map { c * g.a[$0] + s * g.b[$0] })
+        guard fullScale > 0, fullScale.isFinite,
+            let weights = weights(order: l, cosine: cos(Double(l) * theta), sine: sin(Double(l) * theta))
+        else { return nil }
+        let v = moments.project(rhs: acc, weights: weights, minimumWeight: fullTurnWeight)
         let n = width * height
         var out = [UInt8](repeating: 0, count: 4 * n)
         let inv = 255 / fullScale
         out.withUnsafeMutableBufferPointer { o in
-            for i in 0..<n {
+            for i in 0..<n where v[i].isFinite {
                 let p = 4 * i
                 let k = UInt8(min(255, abs(v[i]) * inv + 0.5))
                 if v[i] > 0 { o[p] = k } else { o[p + 2] = k }

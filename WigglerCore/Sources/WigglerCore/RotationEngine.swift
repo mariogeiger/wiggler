@@ -61,7 +61,10 @@ public struct DepthMap {
 }
 
 public struct FrameInput {
+    /// Luma image used for feature tracking.
     public var image: GrayImage
+    public var chromaRed: GrayImage?
+    public var chromaBlue: GrayImage?
     public var intrinsics: CameraIntrinsics
     /// Camera-to-world rigid transform (ARKit camera convention: x right, y up, z backward).
     public var cameraToWorld: RigidTransform
@@ -70,9 +73,11 @@ public struct FrameInput {
     public var timestamp: Double
     public init(
         image: GrayImage, intrinsics: CameraIntrinsics, cameraToWorld: RigidTransform, poseValid: Bool,
-        depth: DepthMap?, timestamp: Double
+        depth: DepthMap?, timestamp: Double, chromaRed: GrayImage? = nil, chromaBlue: GrayImage? = nil
     ) {
         self.image = image
+        self.chromaRed = chromaRed
+        self.chromaBlue = chromaBlue
         self.intrinsics = intrinsics
         self.cameraToWorld = cameraToWorld
         self.poseValid = poseValid

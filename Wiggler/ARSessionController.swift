@@ -16,13 +16,19 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
     }
     private static let trackCountKey = "targetTrackCount"
     private static let trackCountRange = 5...400
-    /// Harmonics of the luma in the rotation angle that the map fits and the user can display.
+    /// Harmonics in the rotation angle that the map fits and the user can display.
     static let harmonicOrders = [1, 2, 3]
     /// Which harmonic of the current image is drawn over the camera image; nil = off. Persisted.
     @Published private(set) var harmonicOrder: Int? {
         didSet { UserDefaults.standard.set(harmonicOrder ?? 0, forKey: Self.harmonicOrderKey) }
     }
     private static let harmonicOrderKey = "harmonicOrder"
+    @Published private(set) var harmonicSignal = HarmonicSignal.luma {
+        didSet { UserDefaults.standard.set(harmonicSignal.rawValue, forKey: Self.harmonicSignalKey) }
+    }
+    private static let harmonicSignalKey = "harmonicSignal"
+    /// Main-thread selection generation, also read under the snapshot lock by the engine queue.
+    private var harmonicRevision = 0
     /// Fraction of the first full turn the harmonic map has accumulated (it is drawn from 1).
     @Published private(set) var harmonicProgress = 0.0
     @Published private(set) var recorderStatus = SessionRecorder.Status(
@@ -52,18 +58,16 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
     private let lock = NSLock()
     private var latestOutput = EngineOutput()
     private var latestHarmonicImage: CGImage?
+    private var harmonicSignalSnapshot = HarmonicSignal.luma
     private var latestDisplayTransform = CGAffineTransform.identity
     private var viewportSize = CGSize(width: 1, height: 1)
     private var lastPublish = Date.distantPast
     // Engine queue. Only stable measurements contribute to the map, even when its display is off.
-    private var harmonics = HarmonicMap(
-        width: FrameConverter.engineWidth, height: FrameConverter.engineHeight,
-        orders: ARSessionController.harmonicOrders)
+    private var harmonics = HarmonicFit(orders: ARSessionController.harmonicOrders)
+    private var harmonicRevisionEngine = 0
     private var harmonicOrderEngine: Int?
     private var renderedHarmonicImage: CGImage?
     private var lastHarmonicRender = Date.distantPast
-    /// Fully opaque at this luma modulation (20 of 255 levels).
-    private let harmonicFullScale: Float = 20 / 255
 
     override init() {
         super.init()
@@ -82,6 +86,9 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
         let savedOrder = UserDefaults.standard.integer(forKey: Self.harmonicOrderKey)
         harmonicOrder = Self.harmonicOrders.contains(savedOrder) ? savedOrder : nil
         harmonicOrderEngine = harmonicOrder
+        harmonicSignal = HarmonicSignal(savedValue: UserDefaults.standard.string(forKey: Self.harmonicSignalKey))
+        harmonics.select(harmonicSignal)
+        harmonicSignalSnapshot = harmonicSignal
     }
 
     private static func clampTrackCount(_ n: Int) -> Int {
@@ -126,7 +133,32 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
 
     func setHarmonicOrder(_ l: Int?) {
         harmonicOrder = l
-        engineQueue.async { [self] in harmonicOrderEngine = l }
+        enqueueHarmonicSelection()
+    }
+
+    func setHarmonicSignal(_ signal: HarmonicSignal) {
+        guard harmonicSignal != signal else { return }
+        harmonicSignal = signal
+        harmonicProgress = 0
+        enqueueHarmonicSelection()
+    }
+
+    /// Clear the render snapshot now; old in-flight frames cannot republish a prior selection.
+    private func enqueueHarmonicSelection() {
+        let signal = harmonicSignal, order = harmonicOrder
+        lock.lock()
+        harmonicRevision += 1
+        harmonicSignalSnapshot = signal
+        let revision = harmonicRevision
+        latestHarmonicImage = nil
+        lock.unlock()
+        engineQueue.async { [self] in
+            harmonics.select(signal)
+            harmonicOrderEngine = order
+            harmonicRevisionEngine = revision
+            renderedHarmonicImage = nil
+            lastHarmonicRender = .distantPast
+        }
     }
 
     func toggleRecording() {
@@ -170,13 +202,15 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
         lock.lock()
         let busy = engineBusy
         if !busy { engineBusy = true }
+        let signal = harmonicSignalSnapshot
+        let inputRevision = harmonicRevision
         let size = viewportSize
         lock.unlock()
         if busy {
             droppedFrames += 1
             return
         }
-        guard let input = converter.convert(frame) else {
+        guard let input = converter.convert(frame, harmonicSignal: signal) else {
             lock.lock()
             engineBusy = false
             lock.unlock()
@@ -191,10 +225,12 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
             }
             lastProcessedTimestamp = input.timestamp
             let out = engine.process(input)
-            updateHarmonics(input: input, output: out)
+            updateHarmonics(input: inputRevision == harmonicRevisionEngine ? input : nil, output: out)
             lock.lock()
             latestOutput = out
-            latestHarmonicImage = renderedHarmonicImage
+            if harmonicRevisionEngine == harmonicRevision {
+                latestHarmonicImage = renderedHarmonicImage
+            }
             latestDisplayTransform = transform
             engineBusy = false
             lock.unlock()
@@ -211,9 +247,10 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
                 lastPublish = now
                 let status = recorder.status(now: input.timestamp)
                 let progress = harmonics.turnProgress
+                let revision = harmonicRevisionEngine
                 DispatchQueue.main.async { [weak self] in
                     self?.output = out
-                    self?.harmonicProgress = progress
+                    if self?.harmonicRevision == revision { self?.harmonicProgress = progress }
                     self?.recorderStatus = status
                 }
             }
@@ -221,16 +258,17 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
     }
 
     /// Engine queue. Feeds the harmonic map and publishes its rendering at ≤ 15 Hz while it is meaningful.
-    private func updateHarmonics(input: FrameInput, output out: EngineOutput) {
-        harmonics.update(image: input.image, output: out)
+    private func updateHarmonics(input: FrameInput?, output out: EngineOutput) {
+        harmonics.update(frame: input, output: out)
+        guard let map = harmonics.map, map.hasFullTurn, let order = harmonicOrderEngine else {
+            renderedHarmonicImage = nil
+            return
+        }
         let now = Date()
-        let show = harmonicOrderEngine != nil && out.axisStable && harmonics.hasFullTurn
-        if show {
-            guard now.timeIntervalSince(lastHarmonicRender) > 1.0 / 15.0, let l = harmonicOrderEngine,
-                let rgba = harmonics.render(order: l, theta: out.theta, fullScale: harmonicFullScale)
-            else { return }
-            lastHarmonicRender = now
-            renderedHarmonicImage = CGImage.rgba8(width: harmonics.width, height: harmonics.height, bytes: rgba)
+        guard now.timeIntervalSince(lastHarmonicRender) > 1.0 / 15.0 else { return }
+        lastHarmonicRender = now
+        if let rgba = map.render(order: order, theta: out.theta, fullScale: harmonics.signal.fullScale) {
+            renderedHarmonicImage = CGImage.rgba8(width: map.width, height: map.height, bytes: rgba)
         } else {
             renderedHarmonicImage = nil
         }

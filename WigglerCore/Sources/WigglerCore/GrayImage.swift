@@ -1,6 +1,6 @@
 import Foundation
 
-/// Single-channel float image, row-major, values nominally in [0, 1].
+/// Row-major scalar image. Tracking uses luma in [0, 1]; harmonic inputs may be signed, metric or NaN (missing).
 public struct GrayImage {
     public let width: Int
     public let height: Int

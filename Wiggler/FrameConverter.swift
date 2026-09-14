@@ -16,8 +16,9 @@ final class FrameConverter {
 
     deinit { tempBuffer?.deallocate() }
 
-    func convert(_ frame: ARFrame) -> FrameInput? {
+    func convert(_ frame: ARFrame, harmonicSignal: HarmonicSignal) -> FrameInput? {
         guard let image = luma(from: frame.capturedImage) else { return nil }
+        let chroma = chroma(from: frame.capturedImage, signal: harmonicSignal)
         let res = frame.camera.imageResolution
         let k = frame.camera.intrinsics
         let intrinsics = CameraIntrinsics(
@@ -48,7 +49,9 @@ final class FrameConverter {
         let depth = frame.sceneDepth.flatMap { depthMap(from: $0) }
         return FrameInput(
             image: image, intrinsics: intrinsics, cameraToWorld: pose, poseValid: poseValid,
-            depth: depth, timestamp: frame.timestamp)
+            depth: depth, timestamp: frame.timestamp,
+            chromaRed: harmonicSignal == .chromaRed ? chroma : nil,
+            chromaBlue: harmonicSignal == .chromaBlue ? chroma : nil)
     }
 
     /// Downscale the luma plane with vImage and convert to a float image.
@@ -85,6 +88,47 @@ final class FrameConverter {
         }
         if result != nil { lastLuma8 = scaled }
         return result
+    }
+
+    private func chroma(from pixelBuffer: CVPixelBuffer, signal: HarmonicSignal) -> GrayImage? {
+        guard signal == .chromaRed || signal == .chromaBlue else { return nil }
+        guard CVPixelBufferGetPlaneCount(pixelBuffer) >= 2 else { return nil }
+        CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
+        guard let base = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, 1) else { return nil }
+        let image = GrayImage(
+            width: CVPixelBufferGetWidthOfPlane(pixelBuffer, 1),
+            height: CVPixelBufferGetHeightOfPlane(pixelBuffer, 1),
+            cbcr8: base.assumingMemoryBound(to: UInt8.self),
+            bytesPerRow: CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 1),
+            component: signal == .chromaRed ? .red : .blue,
+            videoRange: CVPixelBufferGetPixelFormatType(pixelBuffer) == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange)
+        return scale(image)
+    }
+
+    /// Resize a signed scalar plane without quantizing its neutral value or swapping chroma channels.
+    private func scale(_ image: GrayImage) -> GrayImage? {
+        var pixels = [Float](repeating: 0, count: Self.engineWidth * Self.engineHeight)
+        let error = image.pixels.withUnsafeBufferPointer { source in
+            pixels.withUnsafeMutableBufferPointer { destination in
+                var src = vImage_Buffer(
+                    data: UnsafeMutableRawPointer(mutating: source.baseAddress!),
+                    height: vImagePixelCount(image.height), width: vImagePixelCount(image.width),
+                    rowBytes: image.width * MemoryLayout<Float>.stride)
+                var dst = vImage_Buffer(
+                    data: destination.baseAddress!, height: vImagePixelCount(Self.engineHeight),
+                    width: vImagePixelCount(Self.engineWidth), rowBytes: Self.engineWidth * MemoryLayout<Float>.stride)
+                let needed = vImageScale_PlanarF(&src, &dst, nil, vImage_Flags(kvImageGetTempBufferSize))
+                if needed > tempBufferSize {
+                    tempBuffer?.deallocate()
+                    tempBuffer = UnsafeMutableRawPointer.allocate(byteCount: needed, alignment: 16)
+                    tempBufferSize = needed
+                }
+                return vImageScale_PlanarF(&src, &dst, tempBuffer, vImage_Flags(kvImageNoFlags))
+            }
+        }
+        guard error == kvImageNoError else { return nil }
+        return GrayImage(width: Self.engineWidth, height: Self.engineHeight, pixels: pixels)
     }
 
     private func depthMap(from depth: ARDepthData) -> DepthMap? {

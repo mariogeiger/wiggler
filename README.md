@@ -82,6 +82,22 @@ pre-commit run --all-files
 Point colors: green = tracking consistent with rotation, red = inconsistent (hands, background),
 yellow = no depth, white = new.
 
+The harmonic input menu selects **Y** (luma / brightness, the default), **Cr** (red chroma, red relative to
+luminance), **Cb** (blue chroma, blue relative to luminance), or **Depth** (LiDAR depth in meters).
+The selection is saved. Tracking always uses luma. Choose **off**, **l=1**, **l=2**, or **l=3** beside it to
+hide the map or display a harmonic. Switching input clears the map and requires a new full turn.
+The overlay shows the signed reconstruction `a cos(lθ) + b sin(lθ)`: red is positive, blue is negative,
+and opacity is its absolute value, reaching full opacity at 20/255 for color or 2 cm for depth.
+It is not a hue/phase map.
+
+Chroma comes from the camera's Cb,Cr plane, centered at byte 128 and normalized by 255 (full range) or
+224 (video range), then scaled to the tracking grid. Depth keeps its native pixel grid and the same
+normalized camera field of view. Non-finite depths, depths at or below 5 cm, and low-confidence samples
+are missing observations, not zeros; absent confidence accepts otherwise valid depths. Each pixel needs
+enough valid angular coverage and a nonsingular fit, or stays transparent. Entire missing frames decay
+the existing fit without adding samples; a changed grid clears it. Depth is disabled on devices without scene-depth support. Recordings remain luma/depth;
+chroma is not added to the `.wig` format.
+
 ## How it works
 
 The algorithms live in `WigglerCore` (pure Swift, without Apple platform-framework dependencies, so they can
