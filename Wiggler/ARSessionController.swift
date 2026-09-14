@@ -10,7 +10,8 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
 
     /// Latest engine output for the overlays (published at ~30 Hz).
     @Published private(set) var output = EngineOutput()
-    /// Marker in engine image coordinates (pixels of the 480x360 landscape image), nil when not placed.
+    /// Marker in engine image coordinates (pixels of the 480x360 landscape image), nil while the engine is idle.
+    /// Placed by the engine itself on the moving textured region, or by a tap.
     @Published private(set) var markerImagePoint: CGPoint?
     /// Number of tracked points the engine aims for. Persisted across launches.
     @Published private(set) var targetTrackCount = EngineConfig().targetTrackCount {
@@ -18,6 +19,13 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
     }
     private static let trackCountKey = "targetTrackCount"
     private static let trackCountRange = 20...400
+    /// Which real quantity of the per-pixel dipole c₁ is drawn over the camera image; nil = off. Persisted.
+    @Published private(set) var dipoleDisplay: DipoleMap.Display? {
+        didSet { UserDefaults.standard.set((dipoleDisplay?.rawValue ?? -1) + 1, forKey: Self.dipoleDisplayKey) }
+    }
+    private static let dipoleDisplayKey = "dipoleDisplay"
+    /// Latest rendered dipole overlay (engine image size), nil when hidden.
+    @Published private(set) var dipoleImage: CGImage?
     @Published private(set) var recorderStatus = SessionRecorder.Status(recording: false, seconds: 0, megabytes: 0, frames: 0, fileName: "")
     /// Set when a recording stops: the view presents the export sheet for it.
     @Published var pendingShare: ShareItem?
@@ -26,8 +34,6 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
 
     // MARK: Private
 
-    /// Feature search radius around the marker, as a fraction of the engine image height.
-    private let roiFraction = 0.35
     private let engine = RotationEngine()
     private let converter = FrameConverter()
     private let recorder = SessionRecorder()
@@ -45,9 +51,17 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
     private let lock = NSLock()
     private var latestOutput = EngineOutput()
     private var latestDisplayTransform = CGAffineTransform.identity
-    private var markerForEngine: CGPoint?
     private var viewportSize = CGSize(width: 1, height: 1)
     private var lastPublish = Date.distantPast
+    // Dipole map (engine queue). It accumulates whenever the angle is tracked, so switching the display on is instant.
+    private var dipole = DipoleMap(width: FrameConverter.engineWidth, height: FrameConverter.engineHeight)
+    private var dipoleDisplayEngine: DipoleMap.Display?
+    private var dipoleShown = false
+    private var lastDipoleRender = Date.distantPast
+    /// Fully opaque at this luma modulation (20 of 255 levels).
+    private let dipoleFullScale: Float = 20 / 255
+    /// Below this speed the window takes too long to fill for the map to mean anything: keep it hidden.
+    private let dipoleMinRPM = 10.0
 
     override init() {
         super.init()
@@ -62,6 +76,9 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
         let saved = UserDefaults.standard.integer(forKey: Self.trackCountKey)
         if saved != 0 { targetTrackCount = Self.clampTrackCount(saved) }
         engine.config.targetTrackCount = targetTrackCount
+        let savedDisplay = UserDefaults.standard.integer(forKey: Self.dipoleDisplayKey)
+        dipoleDisplay = savedDisplay > 0 ? DipoleMap.Display(rawValue: savedDisplay - 1) : nil
+        dipoleDisplayEngine = dipoleDisplay
     }
 
     private static func clampTrackCount(_ n: Int) -> Int {
@@ -97,7 +114,7 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
 
     // MARK: Controls (main thread)
 
-    /// Called with a touch location in view coordinates.
+    /// Called with a touch location in view coordinates: overrides the automatic placement.
     func placeMarker(viewPoint: CGPoint) {
         lock.lock()
         let t = latestDisplayTransform
@@ -106,18 +123,18 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
         guard size.width > 1, size.height > 1 else { return }
         let n = CGPoint(x: viewPoint.x / size.width, y: viewPoint.y / size.height).applying(t.inverted())
         let p = CGPoint(x: n.x * CGFloat(FrameConverter.engineWidth), y: n.y * CGFloat(FrameConverter.engineHeight))
-        markerImagePoint = p
-        lock.lock()
-        markerForEngine = p
-        lock.unlock()
-        let radius = Float(roiFraction * Double(FrameConverter.engineHeight))
-        engineQueue.async { [engine] in engine.setMarker(x: Float(p.x), y: Float(p.y), radius: radius) }
+        engineQueue.async { [engine] in engine.setMarker(x: Float(p.x), y: Float(p.y)) }
     }
 
     func adjustTrackCount(by delta: Int) {
         targetTrackCount = Self.clampTrackCount(targetTrackCount + delta)
         let n = targetTrackCount
         engineQueue.async { [engine] in engine.config.targetTrackCount = n }
+    }
+
+    func setDipoleDisplay(_ d: DipoleMap.Display?) {
+        dipoleDisplay = d
+        engineQueue.async { [self] in dipoleDisplayEngine = d }
     }
 
     func toggleRecording() {
@@ -129,6 +146,12 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
             recorder.start()
         }
         recorderStatus = recorder.status(now: 0)
+    }
+
+    /// Normalised engine image → normalised view coordinates.
+    func displayTransform() -> CGAffineTransform {
+        lock.lock(); defer { lock.unlock() }
+        return latestDisplayTransform
     }
 
     /// Engine image pixel → view coordinates (for the overlays).
@@ -172,16 +195,17 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
             }
             lastProcessedTimestamp = input.timestamp
             let out = engine.process(input)
+            updateDipole(input: input, output: out)
             lock.lock()
             latestOutput = out
             latestDisplayTransform = transform
-            let marker = markerForEngine
             engineBusy = false
             lock.unlock()
             frameCounter += 1
             if recorder.isRecording && frameCounter % recordEveryNth == 0 {
-                recorder.append(input: input, luma8: luma8, output: out, marker: marker,
-                                roiRadius: Float(roiFraction * Double(FrameConverter.engineHeight)),
+                recorder.append(input: input, luma8: luma8, output: out,
+                                marker: out.marker.map { CGPoint(x: CGFloat($0.x), y: CGFloat($0.y)) },
+                                roiRadius: out.marker?.radius ?? 0,
                                 droppedFrames: droppedFrames, processedFps: processedFps)
             }
             let now = Date()
@@ -190,9 +214,32 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
                 let status = recorder.status(now: input.timestamp)
                 DispatchQueue.main.async { [weak self] in
                     self?.output = out
+                    self?.markerImagePoint = out.marker.map { CGPoint(x: CGFloat($0.x), y: CGFloat($0.y)) }
                     self?.recorderStatus = status
                 }
             }
+        }
+    }
+
+    /// Engine queue. Feeds the dipole map and publishes its rendering at ≤ 15 Hz while it is meaningful.
+    private func updateDipole(input: FrameInput, output out: EngineOutput) {
+        switch out.state {
+        case .locked: dipole.add(image: input.image, theta: out.theta)
+        case .lost: break                      // the angle is held, not measured: neither add nor forget
+        case .idle, .calibrating: dipole.reset()  // the angle reference is about to change
+        }
+        let now = Date()
+        let show = dipoleDisplayEngine != nil && out.state == .locked && abs(out.rpm) > dipoleMinRPM && dipole.hasFullTurn
+        if show {
+            guard now.timeIntervalSince(lastDipoleRender) > 1.0 / 15.0, let display = dipoleDisplayEngine,
+                  let rgba = dipole.render(display, theta: out.theta, fullScale: dipoleFullScale) else { return }
+            lastDipoleRender = now
+            let image = CGImage.rgba8(width: dipole.width, height: dipole.height, bytes: rgba)
+            dipoleShown = image != nil
+            DispatchQueue.main.async { [weak self] in self?.dipoleImage = image }
+        } else if dipoleShown {
+            dipoleShown = false
+            DispatchQueue.main.async { [weak self] in self?.dipoleImage = nil }
         }
     }
 

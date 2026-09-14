@@ -11,6 +11,7 @@
 		A100000000000000000000A2 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000F2 /* ContentView.swift */; };
 		A100000000000000000000A3 /* ARSessionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000F3 /* ARSessionController.swift */; };
 		A100000000000000000000A4 /* AxisOverlayNode.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000F4 /* AxisOverlayNode.swift */; };
+		A100000000000000000000A8 /* DipoleOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000F8 /* DipoleOverlay.swift */; };
 		A100000000000000000000A5 /* FrameConverter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000F5 /* FrameConverter.swift */; };
 		A100000000000000000000A7 /* SessionRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000F6 /* SessionRecorder.swift */; };
 		A100000000000000000000AA /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000FA /* Assets.xcassets */; };
@@ -23,6 +24,7 @@
 		A100000000000000000000F2 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		A100000000000000000000F3 /* ARSessionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ARSessionController.swift; sourceTree = "<group>"; };
 		A100000000000000000000F4 /* AxisOverlayNode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AxisOverlayNode.swift; sourceTree = "<group>"; };
+		A100000000000000000000F8 /* DipoleOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DipoleOverlay.swift; sourceTree = "<group>"; };
 		A100000000000000000000F5 /* FrameConverter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameConverter.swift; sourceTree = "<group>"; };
 		A100000000000000000000F6 /* SessionRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionRecorder.swift; sourceTree = "<group>"; };
 		A100000000000000000000F7 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -57,6 +59,7 @@
 				A100000000000000000000F2 /* ContentView.swift */,
 				A100000000000000000000F3 /* ARSessionController.swift */,
 				A100000000000000000000F4 /* AxisOverlayNode.swift */,
+				A100000000000000000000F8 /* DipoleOverlay.swift */,
 				A100000000000000000000F5 /* FrameConverter.swift */,
 				A100000000000000000000F6 /* SessionRecorder.swift */,
 				A100000000000000000000F7 /* Info.plist */,
@@ -159,6 +162,7 @@
 				A100000000000000000000A2 /* ContentView.swift in Sources */,
 				A100000000000000000000A3 /* ARSessionController.swift in Sources */,
 				A100000000000000000000A4 /* AxisOverlayNode.swift in Sources */,
+				A100000000000000000000A8 /* DipoleOverlay.swift in Sources */,
 				A100000000000000000000A5 /* FrameConverter.swift in Sources */,
 				A100000000000000000000A7 /* SessionRecorder.swift in Sources */,
 			);

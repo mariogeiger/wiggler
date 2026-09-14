@@ -22,6 +22,8 @@ struct ContentView: View {
             ZStack {
                 ARViewContainer(controller: controller)
 
+                DipoleOverlay(controller: controller, image: controller.dipoleImage)
+                    .allowsHitTesting(false)
                 pointsOverlay
                     .allowsHitTesting(false)
                 markerOverlay
@@ -32,22 +34,29 @@ struct ContentView: View {
                     .contentShape(Rectangle())
                     .onTapGesture(coordinateSpace: .local) { p in controller.placeMarker(viewPoint: p) }
 
-                VStack {
+                // Everything lives at the top so the hand turning the object never covers a control.
+                VStack(spacing: 10) {
                     HStack(alignment: .top) {
                         rpmText
+                        Spacer()
+                        statusText
                         Spacer()
                         angleText
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 56)
-                    Spacer()
                     HStack {
                         pointCountControl
                         Spacer()
                         recordButton
                     }
                     .padding(.horizontal, 20)
-                    .padding(.bottom, 40)
+                    HStack {
+                        dipoleControl
+                        Spacer()
+                    }
+                    .padding(.horizontal, 20)
+                    Spacer()
                 }
             }
             .onAppear { controller.updateViewportSize(geo.size) }
@@ -97,6 +106,15 @@ struct ContentView: View {
             .foregroundStyle(.white.opacity(0.8))
     }
 
+    /// What the engine is doing while it is not measuring.
+    private var statusText: some View {
+        let o = controller.output
+        return Text(o.state == .locked ? "" : o.message)
+            .font(.caption2)
+            .foregroundStyle(.white.opacity(0.7))
+            .multilineTextAlignment(.center)
+    }
+
     private var angleText: some View {
         let o = controller.output
         return Text(o.state == .locked && o.angleConfidence > 0 ? String(format: "%.0f°", o.angleDegrees) : "")
@@ -118,6 +136,29 @@ struct ContentView: View {
         .foregroundStyle(.white.opacity(0.8))
         .padding(.horizontal, 6)
         .background(.black.opacity(0.35), in: Capsule())
+    }
+
+    /// Which view of the per-pixel dipole is drawn (see `DipoleMap.Display`).
+    private var dipoleControl: some View {
+        HStack(spacing: 2) {
+            dipoleButton(nil, "off")
+            ForEach(DipoleMap.Display.allCases, id: \.self) { dipoleButton($0, $0.label) }
+        }
+        .padding(3)
+        .background(.black.opacity(0.35), in: Capsule())
+    }
+
+    private func dipoleButton(_ d: DipoleMap.Display?, _ label: String) -> some View {
+        let selected = controller.dipoleDisplay == d
+        return Button { controller.setDipoleDisplay(d) } label: {
+            Text(label)
+                .font(.caption2.monospaced())
+                .foregroundStyle(selected ? .black : .white.opacity(0.8))
+                .padding(.horizontal, 8).padding(.vertical, 6)
+                .background(selected ? Color.white.opacity(0.85) : .clear, in: Capsule())
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
     }
 
     private var recordButton: some View {

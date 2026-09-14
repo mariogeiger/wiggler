@@ -84,8 +84,17 @@ public struct TrackDebug {
     public var status: TrackStatus
 }
 
+public struct Marker {
+    public var x: Float
+    public var y: Float
+    /// Region-of-interest radius, pixels.
+    public var radius: Float
+}
+
 public struct EngineOutput {
     public var state: EngineState = .idle
+    /// Where the object is tracked (engine pixels); nil while idle.
+    public var marker: Marker?
     public var axis: Axis?
     /// Continuous (unwrapped) angle, radians.
     public var theta: Double = 0
@@ -141,6 +150,12 @@ public struct EngineConfig {
     public var descriptorSide = 32
     public var keyframeBins = 36
     public var lostAfterFrames = 45
+    /// Radius of the region of interest around the marker, as a fraction of the image height.
+    public var roiRadiusFraction = 0.35
+    /// Place the marker on the moving textured region by itself (see `MotionLocator`), and look for it again
+    /// after the angle has been lost for `autoMarkerLostSeconds`.
+    public var autoMarker = true
+    public var autoMarkerLostSeconds = 5.0
     public init() {}
 }
 
@@ -177,7 +192,9 @@ public final class RotationEngine {
     private var reloc: Relocalizer
     private var state: EngineState = .idle
 
-    private var marker: (x: Float, y: Float, radius: Float)?
+    private var marker: (x: Float, y: Float)?
+    private var locator = MotionLocator()
+    private var lostSince: Double?
     private var axis: Axis?
     private var lastEstimate: AxisEstimate?
     private var inconsistentAxisCount = 0
@@ -208,9 +225,9 @@ public final class RotationEngine {
 
     // MARK: Marker
 
-    /// Place the marker (engine image pixels). `radius` is the region of interest radius in pixels.
-    public func setMarker(x: Float, y: Float, radius: Float) {
-        marker = (x, y, radius)
+    /// Place the marker (engine image pixels); the region of interest is `config.roiRadiusFraction` of the image height.
+    public func setMarker(x: Float, y: Float) {
+        marker = (x, y)
         resetAll()
         state = .calibrating
     }
@@ -240,6 +257,8 @@ public final class RotationEngine {
         rpmFiltered = 0
         lastInlierCount = 0
         lastAngleOk = false
+        lostSince = nil
+        locator.reset()
     }
 
     private func restartCalibration() {
@@ -276,9 +295,16 @@ public final class RotationEngine {
             return d > 0 && d < 0.5 ? d : 1.0 / 60.0
         }()
 
-        guard let marker = marker else {
+        let roiRadius = Float(config.roiRadiusFraction) * Float(input.image.height)
+        if marker == nil, config.autoMarker,
+           let hit = locator.add(image: input.image, prev: prevPyramid, cur: pyramid,
+                                 pose: input.poseValid ? input.cameraToWorld : nil, dt: dt, time: input.timestamp,
+                                 radius: roiRadius, klt: klt, corners: corners) {
+            setMarker(x: hit.x, y: hit.y)
+        }
+        guard let marker = marker.map({ Marker(x: $0.x, y: $0.y, radius: roiRadius) }) else {
             out.state = .idle
-            out.message = "Touchez l'objet à suivre"
+            out.message = config.autoMarker ? "Cherche un objet en mouvement… \(locator.movingCount) pts mobiles" : "Touchez l'objet à suivre"
             out.processingMillis = Date().timeIntervalSince(t0) * 1000
             return out
         }
@@ -420,6 +446,18 @@ public final class RotationEngine {
             } else if state == .lost && angleOk {
                 state = .locked
             }
+            if state == .lost {
+                if lostSince == nil { lostSince = input.timestamp }
+                if config.autoMarker, input.timestamp - lostSince! > config.autoMarkerLostSeconds {
+                    // The object is gone: look for a moving one again.
+                    clearMarker()
+                    out.state = .idle
+                    out.processingMillis = Date().timeIntervalSince(t0) * 1000
+                    return out
+                }
+            } else {
+                lostSince = nil
+            }
             relocalise(image: input.image, marker: marker, angleOk: angleOk,
                        healthy: geometryHealthy, omega: angle.lastDelta / dt, dt: dt)
         case .idle:
@@ -439,6 +477,7 @@ public final class RotationEngine {
 
         // 8. Output.
         out.state = state
+        out.marker = marker
         out.axis = axis
         out.theta = angle.theta
         out.angleDegrees = positiveAngle(angle.theta) * 180 / .pi
@@ -587,7 +626,7 @@ public final class RotationEngine {
 
     /// Fuse the appearance measurement into the integrated angle. Returns nothing: everything it does is either
     /// a bounded correction of `angle`, or bookkeeping on the library.
-    private func relocalise(image: GrayImage, marker: (x: Float, y: Float, radius: Float),
+    private func relocalise(image: GrayImage, marker: Marker,
                             angleOk: Bool, healthy: Bool, omega: Double, dt: Double) {
         let patch = image.patch(centerX: marker.x, centerY: marker.y, halfSize: marker.radius, side: config.descriptorSide)
         // Fill the library while the geometry is clean. A partially filled library is already useful.
