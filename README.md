@@ -1,193 +1,191 @@
 # Wiggler
 
-App iPhone (15 Pro, iOS 17+) qui mesure en temps réel la rotation d'un objet filmé par un téléphone fixe :
-tour de potier, chaise de bureau, n'importe quoi qui tourne autour d'un axe fixe. Elle infère l'axe, puis l'angle
-de l'objet (0–360°) autour de cet axe, et affiche en réalité augmentée un cylindre sur l'axe et un rayon
-(demi-plan) qui tourne avec la pièce.
+An iPhone app (15 Pro, iOS 17+) that measures the rotation of an object in real time from a stationary phone:
+a pottery wheel, an office chair, or anything rotating around a fixed axis. It infers the axis, then the object's
+angle (0–360°) around that axis, and displays an augmented-reality cylinder along the axis and a ray
+(half-plane) that rotates with the object.
 
-Aucune hypothèse sur l'objet, la distance ou le point de vue. Une seule hypothèse : entre deux ré-évaluations
-l'objet est à peu près rigide et l'axe à peu près fixe (« semi-statique »). Tous les capteurs sont utilisés en
-permanence : image de la caméra, profondeur LiDAR, pose ARKit.
+No assumptions about the object, distance, or viewpoint. There is just one assumption: between two estimates,
+the object is approximately rigid and its axis approximately fixed ("semi-static"). All sensors are used
+continuously: camera image, LiDAR depth, and ARKit pose.
 
-## Construire
+## Build
 
 ```bash
 brew install xcodegen
 cd wiggler
-xcodegen generate          # produit Wiggler.xcodeproj
-open Wiggler.xcodeproj     # choisir votre équipe de signature, cible = votre iPhone
+xcodegen generate          # generates Wiggler.xcodeproj
+open Wiggler.xcodeproj     # select your signing team and your iPhone as the target
 ```
 
-Les tests du cœur algorithmique tournent sans iPhone, directement sur le Mac :
+The algorithmic core's tests run directly on a Mac, without an iPhone:
 
 ```bash
 cd WigglerCore
 swift test
 ```
 
-Ils vérifient l'algèbre (valeurs propres, transformations), le suivi de points, l'estimation d'axe, le suivi
-d'angle, la détection de période d'aspect, et un test de bout en bout sur une scène synthétique (disque texturé
-en rotation à vitesse variable, avec carte de profondeur et bruit).
+They check the algebra (eigenvalues, transforms), point tracking, axis estimation, angle tracking,
+appearance-period detection, and an end-to-end synthetic scene (a textured disk rotating at variable speed,
+with a depth map and noise).
 
-Un `Wiggler.xcodeproj` écrit à la main est aussi fourni (pas besoin de XcodeGen). Le bouton « Enregistrer » de
-l'app écrit des fichiers `.wig` (image 480×360, profondeur, pose, sorties du moteur) partageables par AirDrop et
-rejouables hors ligne avec `tools/replay.py`, et comparables entre stratégies de fusion avec
-`tools/fusion.py` (qui sait aussi injecter une occlusion ou une bibliothèque périmée pour tester les deux
-comportements qui comptent).
+A hand-written `Wiggler.xcodeproj` is also provided (XcodeGen is not required). The app's Record button writes
+`.wig` files (480×360 image, depth, pose, engine outputs) that can be shared through AirDrop and replayed
+offline with `tools/replay.py`. Fusion strategies can be compared with `tools/fusion.py`, which can also inject
+an occlusion or a stale library to test those two key behaviors.
 
-## Utilisation
+## Usage
 
-1. Fixer le téléphone en portrait, l'objet dans le champ.
-2. Faire bouger l'objet : la zone et les points sont choisis automatiquement, sans toucher l'écran.
-   Une croix indique la zone détectée. Le moteur explore aussi le reste de l'image ; les points devenus
-   immobiles sont remplacés par des points en mouvement. Si tout s'arrête, les pistes existantes sont conservées.
-   Si une autre zone devient active et que la première ne bouge plus, la calibration repart sur la nouvelle zone.
-3. Faire tourner l'objet. État « calibration » : l'app collecte des cordes 3D jusqu'à trouver un axe bien
-   conditionné, puis attend un tour complet (compteur 0→360°). État « verrouillé » : l'axe est affiché (ligne
-   cyan, cylindre translucide, anneau à la base) et le rayon orange tourne avec la pièce.
-4. Pendant le premier tour après verrouillage, l'app apprend l'aspect de la pièce tous les 10° (jauge
-   « aspect »). Ensuite elle recale l'angle absolu en permanence sur cette bibliothèque et détecte la période
-   d'aspect : 360° (pièce quelconque), 180°, 120°… ou « symétrique » (pièce de révolution : seul l'angle relatif
-   est disponible, l'angle affiché dérive lentement).
+1. Mount the phone in portrait orientation with the object in view.
+2. Move the object: its region and tracking points are selected automatically, without tapping the screen.
+   A cross marks the detected region. The engine also explores the rest of the image; points that become
+   stationary are replaced by moving points. When everything stops, existing tracks are preserved.
+   If another region becomes active while the first stops, calibration restarts on the new region.
+3. Rotate the object. In the calibrating state, the app collects 3D chords until it finds a well-conditioned
+   axis, then waits for a full turn (0→360° counter). In the locked state, the axis is displayed as a cyan line,
+   a translucent cylinder, and a ring at the base; the orange ray rotates with the object.
+4. During the first turn after locking, the app learns the object's appearance every 10° (appearance gauge).
+   It then continuously aligns the absolute angle with this library and detects the appearance period:
+   360° for an arbitrary object, 180°, 120°… or rotational symmetry. For a body of revolution, only the relative
+   angle is available, and the displayed angle drifts slowly.
 
-Points affichés : vert = suivi cohérent avec la rotation, rouge = incohérent (mains, fond), jaune = pas de
-profondeur, blanc = nouveau.
+Point colors: green = tracking consistent with rotation, red = inconsistent (hands, background),
+yellow = no depth, white = new.
 
-## Comment ça marche
+## How it works
 
-Tout est dans `WigglerCore` (Swift pur, sans dépendance Apple, donc testable sur Mac). L'app (`Wiggler/`) ne fait
-que convertir les frames ARKit, appeler le moteur et dessiner.
+The algorithms live in `WigglerCore` (pure Swift, without Apple platform-framework dependencies, so they can
+be tested on a Mac). The app (`Wiggler/`) converts ARKit frames, calls the engine, and renders the output.
 
-### 1. Suivi de points (image)
+### 1. Point tracking (image)
 
-Image luma réduite à 480×360. `MotionLocator` explore l'image par petites régions et détecte des coins de
-Shi–Tomasi. Un Lucas–Kanade pyramidal (4 niveaux, fenêtre 9×9) mesure leur déplacement : à 100 tr/min et 60 fps
-un point du bord bouge d'une quinzaine de pixels, ce que la pyramide absorbe. Chaque point n'est suivi qu'une
-fois par frame ; les mêmes correspondances servent à choisir la zone et à mesurer la rotation.
+The luma image is downscaled to 480×360. `MotionLocator` searches small regions across the image for
+Shi–Tomasi corners. Pyramidal Lucas–Kanade (4 levels, 9×9 window) measures their displacement: at 100 rpm and
+60 fps, an edge point moves about fifteen pixels, which the pyramid can handle. Each point is tracked only
+once per frame; the same correspondences drive region selection and rotation measurement. `PointTracks`
+retains the depth, chord, and extent history of selected identities.
 
-La zone initiale est une concentration stable de coins mobiles. Les mouvements de caméra et les poses ARKit
-invalides suspendent la sélection. Les nouveaux points sont activés selon leur vitesse mesurée, pas seulement
-leur contraste, même sans profondeur et avant l'estimation de l'axe. Les pistes mobiles existantes gardent leur
-historique ; les pistes immobiles cèdent leur place lorsqu'il existe des candidats mobiles. Un arrêt de l'objet
-ne suffit donc pas à vider le suivi. Les points exploratoires expirent et sont redistribués pour ne pas rester
-bloqués sur un fond très texturé. Le budget par défaut est de 160 pistes de mesure et 80 points exploratoires.
-La recherche continue après acquisition, y compris pendant la calibration.
+The initial region is a stable cluster of moving corners. Camera movement and invalid ARKit poses suspend
+selection. New points are activated by measured speed, not just contrast, even without depth and before the
+axis is estimated. Existing moving tracks keep their history; stationary tracks give way when there is
+reliable motion nearby. Stopping the object therefore does not empty the tracker. Exploratory points expire
+and are redistributed so a highly textured background cannot exhaust the search budget. The default budget
+is 160 measurement tracks plus 80 exploratory points. The search continues after acquisition, including
+during calibration.
 
-### 2. Points 3D (LiDAR + pose)
+### 2. 3D points (LiDAR + pose)
 
-Chaque point suivi est dé-projeté avec la profondeur LiDAR (médiane 3×3, rejet des bords de profondeur) et les
-intrinsèques de la caméra, puis passé en coordonnées monde avec la pose ARKit — ce qui absorbe les petits
-mouvements du téléphone. Résultat : des trajectoires 3D métriques, sans aucune connaissance de l'échelle ni de
-la distance.
+Each tracked point is unprojected using LiDAR depth (3×3 median, depth-edge rejection) and the camera
+intrinsics, then transformed into world coordinates using the ARKit pose. This compensates for small phone
+movements. The result is a set of metric 3D trajectories, without prior knowledge of scale or distance.
 
-### 3. Axe : contraintes de cordes
+### 3. Axis: chord constraints
 
-Un point rigide qui tourne autour d'un axe (c, n) décrit un cercle dans un plan ⊥ n. Pour deux positions a, b
-d'une même piste, la corde d = b − a vérifie exactement, quelle que soit l'amplitude de l'arc :
+A rigid point rotating around an axis (c, n) traces a circle in a plane perpendicular to n. For two positions
+a and b on the same track, the chord d = b − a satisfies these exact identities, regardless of arc size:
 
-* d · n = 0 (la corde est dans le plan du cercle) ;
-* (m − c) · d = 0 avec m = (a+b)/2 (la médiatrice d'une corde passe par le centre).
+* d · n = 0 (the chord lies in the circle's plane);
+* (m − c) · d = 0, where m = (a+b)/2 (the perpendicular bisector of a chord passes through the center).
 
-Le moteur accumule ces cordes (une par piste toutes les 3 frames, avec une longueur minimale adaptée au bruit :
-2 cm puis 10 % du rayon de l'objet, base temporelle ≤ 0,75 s) dans une fenêtre glissante de 15 s, et résout :
+The engine accumulates these chords in a sliding 15 s window: one per track every 3 frames, with a minimum
+length adapted to the noise (2 cm initially, then 10% of the object radius) and a time span ≤ 0.75 s. It solves:
 
-* n = vecteur propre de la plus petite valeur propre de Σ w dᵀd ;
-* c = moindres carrés linéaires de Σ w ((m − c)·d̂)², contraint dans le plan ⊥ n passant par le barycentre.
+* n = the eigenvector of the smallest eigenvalue of Σ w d dᵀ;
+* c = the linear least-squares solution of Σ w ((m − c)·d̂)², constrained to the plane perpendicular to n
+  through the centroid.
 
-Le tout en IRLS avec pondération de Huber (3 cm) : mains, fond et profondeurs aberrantes tombent en
-dehors. La qualité est lue sur les valeurs propres (planarité λ₀/λ₁, couverture angulaire λ₁/λ₂) et le taux
-d'inliers. Validé en Python : 0,25° sur la direction et 0,7 mm sur la position avec 6 mm de bruit et 20 % de
-points parasites.
+IRLS with Huber weights (3 cm) rejects hands, background, and depth outliers. Quality is assessed from the
+eigenvalues (planarity λ₀/λ₁, angular coverage λ₁/λ₂) and the inlier ratio. Python validation measured 0.25°
+direction error and 0.7 mm position error with 6 mm noise and 20% outliers.
 
-### 4. Angle : offsets par piste (la « mesure relative »)
+### 4. Angle: per-track offsets (the relative measurement)
 
-Pour chaque piste i, l'azimut φᵢ(t) autour de l'axe vaut θ(t) + oᵢ. L'offset oᵢ est ancré à la naissance de la
-piste ; θ(t) est la moyenne circulaire robuste (Cauchy puis porte à 15°, poids ∝ min(r, r_cap)²) des φᵢ − oᵢ,
-prédite par la vitesse précédente pour encaisser 10°/frame. Les pistes incohérentes trois frames de suite sont
-ré-ancrées. Comme chaque piste « se souvient » de θ depuis sa naissance, la dérive ne vient que du renouvellement
-des pistes, pas de chaque frame (≈ 2° RMS en simulation à 100 tr/min, 6 mm de bruit).
+For each track i, the azimuth φᵢ(t) around the axis is θ(t) + oᵢ. The offset oᵢ is anchored when the track is
+created. θ(t) is the robust circular mean of φᵢ − oᵢ (Cauchy weighting followed by a 15° gate, with weights
+proportional to min(r, r_cap)²), predicted from the previous velocity to handle 10°/frame. Tracks that remain
+inconsistent for three consecutive frames are re-anchored. Since each track remembers θ from its creation,
+drift comes only from track turnover, not from every frame (about 2° RMS in simulation at 100 rpm with 6 mm noise).
 
-Le raffinement de l'axe est fait **après** la mesure d'angle, jamais avant : ré-ancrer les offsets d'abord rend
-tous les candidats d'accord avec θ courant et détruit silencieusement un incrément toutes les
-`axisUpdateInterval` frames (mesuré : 7 % des images gelées, soit ~7 % de rotation perdue en permanence).
+The axis is refined **after** the angle measurement, never before. Re-anchoring offsets first makes every
+candidate agree with the current θ and silently discards one increment every `axisUpdateInterval` frames.
+The measured effect was 7% frozen frames, meaning about 7% of the rotation was consistently lost.
 
-### 4 bis. Recoupement indépendant
+### 4b. Independent cross-check
 
-Les mêmes correspondances KLT donnent aussi une rotation 2D dans le plan image (Procrustes + IRLS,
-`similarityRotation`). Elle n'utilise ni la profondeur ni l'axe, donc elle échoue dans d'autres situations que
-l'azimut 3D. Le rapport entre les deux est appris en ligne (il ne dépend que de l'inclinaison de l'axe vis-à-vis
-de la caméra, constante à téléphone fixe) ; quand les deux cessent de concorder trois frames de suite, c'est que
-quelque chose d'autre s'est emparé des points suivis, et la géométrie n'est plus déclarée « saine » — quel que
-soit le nombre d'inliers qu'elle annonce.
+The same KLT correspondences also provide a 2D image-plane rotation (Procrustes + IRLS, `similarityRotation`).
+It uses neither depth nor the axis, so it fails in different situations from the 3D azimuth. The ratio between
+them is learned online; it depends only on the axis tilt relative to the camera, which is constant for a fixed
+phone. If the two disagree for three consecutive frames, something else has taken over the tracked points.
+The geometry is then no longer considered healthy, regardless of its reported inlier count.
 
-### 5. Aspect et fusion (la « mesure absolue »)
+### 5. Appearance and fusion (the absolute measurement)
 
-Une vignette 32×32 de la région d'intérêt est rangée dans un casier tous les 10°. La bibliothèque est utilisable
-dès 6 casiers — attendre un tour complet la rendrait indisponible la plupart du temps (mesuré : 8 % → 94 % du
-temps verrouillé). La moyenne des casiers remplis (le fond statique) est soustraite avant normalisation.
+A 32×32 patch of the region of interest is stored in an angular bin every 10°. The library is usable as soon as
+6 bins are filled. Waiting for a full turn would leave it unavailable most of the time; measured availability
+rose from 8% to 94% of the locked time. The mean of the filled bins (the static background) is subtracted before
+normalization.
 
-La fusion (`AngleFusion`) est un filtre complémentaire classique, l'incrément géométrique jouant le gyroscope et
-l'aspect la boussole :
+Fusion (`AngleFusion`) uses a classic complementary filter. The geometric increment acts as a gyroscope,
+and appearance acts as a compass:
 
-1. **Aucun téléport.** Une correction devient un débit borné (90°/s), donc l'angle affiché est toujours continu —
-   et les tr/min, qui viennent du seul incrément géométrique, ne sont jamais pollués par les recalages.
-2. **Une incertitude honnête.** σ croît en marche aléatoire (renouvellement des pistes) tant que la géométrie
-   mesure, et **linéairement à la vitesse de rotation** quand elle ne mesure plus : un objet que personne ne
-   regarde continue de tourner dans le même sens. C'est pour cela qu'une occlusion de 0,3 s à 100 tr/min ouvre le
-   portail à 180° alors que 30 s de suivi sain le garde à quelques degrés.
-3. **Portail et validation.** Un appariement n'est utilisé que dans un portail d'innovation à 3σ, et seulement si
-   aucun appariement nettement meilleur ne se trouve en dehors. Le lobe à 120° d'une boîte hexagonale devient donc
-   impossible à suivre après un fonctionnement sain, et une vraie ré-acquisition à 150° reste possible juste après
-   une perte.
+1. **No jumps.** A correction becomes a bounded rate (90°/s), keeping the displayed angle continuous.
+   The rpm reading comes only from the geometric increment and is never contaminated by realignment.
+2. **Honest uncertainty.** σ grows as a random walk through track turnover while geometry provides a
+   measurement, and **linearly with rotation speed** when it does not: an unobserved object keeps rotating in
+   the same direction. This is why a 0.3 s occlusion at 100 rpm opens the gate to 180°, while 30 s of healthy
+   tracking keeps it within a few degrees.
+3. **Gating and validation.** A match is used only inside a 3σ innovation gate, and only if no clearly better
+   match lies outside it. The 120° lobe of a hexagonal box therefore cannot be followed after healthy tracking,
+   while genuine reacquisition at 150° remains possible immediately after a loss.
 
-Quand un appariement **fort** contredit une géométrie **saine** pendant plus de 2 s, c'est la bibliothèque qui a
-tort (objet déplacé, éclairage changé) : elle est reconstruite au lieu d'être combattue.
+When a **strong** match contradicts **healthy** geometry for more than 2 s, the library is considered stale
+(the object moved or the lighting changed). It is rebuilt rather than allowed to fight the geometry.
 
-Mesuré sur `wiggler-20260914-160109` (90 s, manipulations à la main) : 11 discontinuités jusqu'à 177° avant,
-**0 après**, et le résidu contre la rotation d'image indépendante passe de 39 à 19 °/s.
+Measurements on `wiggler-20260914-160109` (90 s, hand manipulations): 11 discontinuities of up to 177° before,
+**0 after**, and the residual against independent image rotation decreased from 39 to 19 °/s.
 
-### 6. Affichage
+### 6. Rendering
 
-SceneKit (`ARSCNView`) : repère local (e₁, n, −e₂) placé sur l'axe monde ; une rotation de θ autour de l'axe y
-local correspond exactement à l'azimut mesuré par le moteur, donc le rayon orange est simplement
-`eulerAngles.y = θ`. Le cylindre prend le rayon (80ᵉ percentile des distances à l'axe) et la hauteur
-(5ᵉ–95ᵉ percentiles) des pistes cohérentes.
+SceneKit (`ARSCNView`) uses a local frame (e₁, n, −e₂) placed on the world-space axis. A rotation of θ around
+its local y axis corresponds exactly to the azimuth measured by the engine, so the orange ray simply uses
+`eulerAngles.y = θ`. The cylinder's radius is the 80th percentile of distances to the axis; its height spans
+the 5th–95th percentiles of consistent tracks.
 
-## Réglages utiles (`EngineConfig`)
+## Useful settings (`EngineConfig`)
 
-| Paramètre | Défaut | Rôle |
+| Parameter | Default | Purpose |
 |---|---|---|
-| `targetTrackCount` | 160 | nombre de points suivis |
-| `maxResidual` | 0.12 | rejet photométrique (0–1) |
-| `chordMinMeters` | 0.02 | longueur minimale d'une corde avant axe |
-| `chordMaxFrames` | 45 | base temporelle max d'une corde |
-| `constraintWindowFrames` | 900 | fenêtre glissante des cordes (15 s) |
-| `lockedDriftFrames` | 3 | estimations d'axe contradictoires avant adoption |
-| `minHealthyInliers` | 20 | points en dessous desquels la géométrie n'est plus « saine » |
-| `staleLibrarySeconds` | 2.0 | contradiction avant reconstruction de la bibliothèque d'aspect |
-| `keyframeBins` | 36 | vignettes par tour (10°) |
-| `reacquisitionDelaySeconds` | 5.0 | délai de recherche après perte de l’angle |
+| `targetTrackCount` | 160 | number of tracked points |
+| `maxResidual` | 0.12 | photometric rejection threshold (0–1) |
+| `chordMinMeters` | 0.02 | minimum chord length before an axis is known |
+| `chordMaxFrames` | 45 | maximum chord time span in frames |
+| `constraintWindowFrames` | 900 | sliding chord window (15 s) |
+| `lockedDriftFrames` | 3 | inconsistent axis estimates before adopting a new axis |
+| `minHealthyInliers` | 20 | minimum point count for healthy geometry |
+| `staleLibrarySeconds` | 2.0 | disagreement duration before rebuilding the appearance library |
+| `keyframeBins` | 36 | patches per turn (10°) |
+| `reacquisitionDelaySeconds` | 5.0 | delay before searching again after losing the angle |
 
-## Limites connues / pistes
+## Known limits / ideas
 
-* ARKit peut se laisser perturber par un grand objet en mouvement (le tour occupe l'image) ; si la pose
-  devient fausse, poser le téléphone face à un fond fixe visible sur les bords, ou forcer la pose identité.
-* Une pièce parfaitement lisse ET de révolution n'offre ni texture ni asymétrie : rien à suivre — par
-  construction l'app ne prédit rien dans ce cas.
-* Le LiDAR est bruité sur les bords (rejet par médiane) et sous ~20 cm ; entre 30 cm et 2 m tout va bien.
+* A large moving object can confuse ARKit when it fills the image. If the pose becomes incorrect, position
+  the phone so that a stationary background is visible at the edges, or force the identity pose.
+* A perfectly smooth body of revolution provides neither texture nor asymmetry: there is nothing to track.
+  By design, the app makes no prediction in this case.
+* LiDAR is noisy at edges (handled by median rejection) and below about 20 cm. Between 30 cm and 2 m it works well.
 
-## Journal d'essais (14 sept. 2026, chaise de bureau + boîte)
+## Experiment log (September 14, 2026, office chair + box)
 
-* **Perf** : le package compilé sans `-O` prenait 60–400 ms/image ; avec `-O` forcé dans `Package.swift`, 2–5 ms.
-* **Boîte au bord de l'assise** : échec — le LiDAR (256×192, lissé) attribue aux points de la boîte la profondeur
-  du sol derrière. Ajout d'un rejet des sauts de profondeur par piste (> 8 %). Règle pratique : viser l'intérieur
-  de la silhouette de profondeur.
-* **Recalibrations intempestives** : l'axe ré-estimé bougeait de 3–8 cm (chaise qui roule) → tolérance élargie et
-  *adoption* douce du nouvel axe au lieu d'un retour en calibration.
-* **Objet tenu en main** (pas d'axe fixe) : jamais verrouillé, planarité ≈ 0,4 — comportement voulu.
-* **Enregistrement `wiggler-20260914-154441`** : verrouillé après un tour (10 s), bibliothèque d'aspect complète à
-  14 s, confiance 0,8–0,99, dispersion 1–3°, passage de la main et inversion de sens encaissés.
-* ARKit livre ~20 fps après quelques minutes (contrainte thermique) ; le moteur n'est pas le goulot.
+* **Performance:** the package took 60–400 ms/frame without `-O`; forcing `-O` in `Package.swift` reduced this to 2–5 ms.
+* **Box at the seat edge:** failed because the smoothed 256×192 LiDAR assigned the depth of the floor behind it
+  to the box's points. Per-track depth-jump rejection (> 8%) was added. A practical rule is to aim inside the
+  depth silhouette.
+* **Unwanted recalibrations:** the re-estimated axis moved by 3–8 cm as the chair rolled. Tolerances were widened,
+  and the new axis is now adopted gradually instead of restarting calibration.
+* **Hand-held object without a fixed axis:** never locked, with planarity about 0.4, as intended.
+* **Recording `wiggler-20260914-154441`:** locked after one turn (10 s), appearance library complete at 14 s,
+  confidence 0.8–0.99, dispersion 1–3°. Hand occlusions and direction reversals were handled successfully.
+* ARKit delivers about 20 fps after a few minutes because of thermal limits; the engine is not the bottleneck.
 
-Outils : `tools/wigreader.py` (lecture des `.wig`), `tools/replay.py` (rejeu complet avec OpenCV, rapport PNG),
-`tools/diag_tracks.py` (ajustement de cercles par piste).
+Tools: `tools/wigreader.py` reads `.wig` files; `tools/replay.py` replays the full pipeline with OpenCV and produces
+PNG reports; `tools/diag_tracks.py` fits circles to individual tracks.

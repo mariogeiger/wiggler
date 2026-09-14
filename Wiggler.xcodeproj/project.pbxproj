@@ -231,7 +231,7 @@
 				INFOPLIST_FILE = Wiggler/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Wiggler;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
-				INFOPLIST_KEY_NSCameraUsageDescription = "La caméra et le LiDAR servent à mesurer la rotation de l'objet.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "The camera and LiDAR are used to measure the object's rotation.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UIRequiresFullScreen = YES;
@@ -261,7 +261,7 @@
 				INFOPLIST_FILE = Wiggler/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Wiggler;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
-				INFOPLIST_KEY_NSCameraUsageDescription = "La caméra et le LiDAR servent à mesurer la rotation de l'objet.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "The camera and LiDAR are used to measure the object's rotation.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UIRequiresFullScreen = YES;
