@@ -15,8 +15,10 @@ public struct CornerDetector {
     ///   - center, radius: disk of interest (pixels).
     ///   - exclude: existing points to keep away from.
     ///   - maxCount: maximum number of corners returned.
-    public func detect(in image: GrayImage, centerX: Float, centerY: Float, radius: Float,
-                       exclude: [(Float, Float)], maxCount: Int) -> [(Float, Float)] {
+    public func detect(
+        in image: GrayImage, centerX: Float, centerY: Float, radius: Float,
+        exclude: [(Float, Float)], maxCount: Int
+    ) -> [(Float, Float)] {
         let w = image.width, h = image.height
         let x0 = max(border, Int(centerX - radius) - 1)
         let x1 = min(w - border - 1, Int(centerX + radius) + 1)
@@ -57,7 +59,9 @@ public struct CornerDetector {
                         if xx < gx0 || xx > gx1 { continue }
                         let i = (yy - gy0) * gw + (xx - gx0)
                         let a = ix[i], b = iy[i]
-                        gxx += a * a; gxy += a * b; gyy += b * b
+                        gxx += a * a
+                        gxy += a * b
+                        gyy += b * b
                     }
                 }
                 let tr = gxx + gyy, det = gxx * gyy - gxy * gxy
@@ -77,7 +81,10 @@ public struct CornerDetector {
                 var isMax = true
                 for dy in -1...1 where isMax {
                     for dx in -1...1 where !(dx == 0 && dy == 0) {
-                        if score[(y + dy) * rw + (x + dx)] > s { isMax = false; break }
+                        if score[(y + dy) * rw + (x + dx)] > s {
+                            isMax = false
+                            break
+                        }
                     }
                 }
                 if isMax { cands.append((s, x + x0, y + y0)) }
@@ -94,7 +101,8 @@ public struct CornerDetector {
                 for i in -1...1 {
                     let k = (cx + i) &* 73856093 ^ (cy + j) &* 19349663
                     if let pts = occupied[k] {
-                        for (ox, oy) in pts where (ox - x) * (ox - x) + (oy - y) * (oy - y) < minDistance * minDistance {
+                        for (ox, oy) in pts where (ox - x) * (ox - x) + (oy - y) * (oy - y) < minDistance * minDistance
+                        {
                             return false
                         }
                     }

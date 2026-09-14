@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import WigglerCore
 
 final class PointTracksTests: XCTestCase {
@@ -8,15 +9,20 @@ final class PointTracksTests: XCTestCase {
     private func input(depth: Float? = 1, confidence: UInt8 = 2) -> FrameInput {
         var rng = LCG(seed: 51)
         let image = GrayImage(width: 64, height: 64, pixels: (0..<4096).map { _ in Float(rng.next()) })
-        let map = depth.map { DepthMap(width: 64, height: 64, depth: [Float](repeating: $0, count: 4096),
-                                      confidence: [UInt8](repeating: confidence, count: 4096)) }
-        return FrameInput(image: image, intrinsics: CameraIntrinsics(fx: 64, fy: 64, cx: 32, cy: 32),
-                          cameraToWorld: .identity, poseValid: true, depth: map, timestamp: 0)
+        let map = depth.map {
+            DepthMap(
+                width: 64, height: 64, depth: [Float](repeating: $0, count: 4096),
+                confidence: [UInt8](repeating: confidence, count: 4096))
+        }
+        return FrameInput(
+            image: image, intrinsics: CameraIntrinsics(fx: 64, fy: 64, cx: 32, cy: 32),
+            cameraToWorld: .identity, poseValid: true, depth: map, timestamp: 0)
     }
 
     private func selectedPoints(firstID: Int = 1) -> [MotionLocator.Point] {
-        let points = CornerDetector().detect(in: input().image, centerX: marker.x, centerY: marker.y,
-                                             radius: marker.radius, exclude: [], maxCount: 4)
+        let points = CornerDetector().detect(
+            in: input().image, centerX: marker.x, centerY: marker.y,
+            radius: marker.radius, exclude: [], maxCount: 4)
         return points.enumerated().map { i, p in
             MotionLocator.Point(id: firstID + i, x: p.0, y: p.1, previousX: p.0, previousY: p.1)
         }
@@ -29,12 +35,15 @@ final class PointTracksTests: XCTestCase {
         return tracks
     }
 
-    private func sample(_ tracks: PointTracks, frame: Int, depth: Float? = 1, confidence: UInt8 = 2,
-                        x: Double = 0, historyLength: Int = 90) {
+    private func sample(
+        _ tracks: PointTracks, frame: Int, depth: Float? = 1, confidence: UInt8 = 2,
+        x: Double = 0, historyLength: Int = 90
+    ) {
         var pose = RigidTransform.identity
         pose.translation = V3(x, 0, 0)
-        tracks.sampleDepth(input(depth: depth, confidence: confidence), pose: pose, frame: frame,
-                           minConfidence: 1, maxJumpFraction: 0.08, historyLength: historyLength)
+        tracks.sampleDepth(
+            input(depth: depth, confidence: confidence), pose: pose, frame: frame,
+            minConfidence: 1, maxJumpFraction: 0.08, historyLength: historyLength)
     }
 
     func testDepthDropoutConfidenceAndPersistentJump() {

@@ -1,5 +1,5 @@
-import SwiftUI
 import ARKit
+import SwiftUI
 import WigglerCore
 
 struct ARViewContainer: UIViewRepresentable {
@@ -70,7 +70,8 @@ struct ContentView: View {
                 case .noDepth: color = .yellow
                 }
                 let r: CGFloat = 2.5
-                ctx.fill(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: 2 * r, height: 2 * r)), with: .color(color))
+                ctx.fill(
+                    Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: 2 * r, height: 2 * r)), with: .color(color))
             }
         }
     }
@@ -93,11 +94,16 @@ struct ContentView: View {
 
     private var pointCountControl: some View {
         HStack(spacing: 10) {
-            Button { controller.adjustTrackCount(by: -20) } label: {
+            Button {
+                controller.adjustTrackCount(by: -20)
+            } label: {
                 Image(systemName: "minus").frame(width: 36, height: 36).contentShape(Rectangle())
             }
-            Text("\(controller.targetTrackCount) pts").font(.caption.monospacedDigit()).foregroundStyle(.white.opacity(0.8))
-            Button { controller.adjustTrackCount(by: 20) } label: {
+            Text("\(controller.targetTrackCount) pts").font(.caption.monospacedDigit()).foregroundStyle(
+                .white.opacity(0.8))
+            Button {
+                controller.adjustTrackCount(by: 20)
+            } label: {
                 Image(systemName: "plus").frame(width: 36, height: 36).contentShape(Rectangle())
             }
         }
@@ -126,7 +132,9 @@ struct ContentView: View {
 
     private func harmonicButton(_ l: Int?, _ label: String) -> some View {
         let selected = controller.harmonicOrder == l
-        return Button { controller.setHarmonicOrder(l) } label: {
+        return Button {
+            controller.setHarmonicOrder(l)
+        } label: {
             Text(label)
                 .font(.caption2.monospaced())
                 .foregroundStyle(selected ? .black : .white.opacity(0.8))

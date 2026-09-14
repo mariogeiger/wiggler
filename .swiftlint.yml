@@ -1,0 +1,14 @@
+only_rules:
+  - duplicate_conditions
+  - duplicate_enum_cases
+  - force_cast
+  - identical_operands
+  - unused_control_flow_label
+  - unused_enumerated
+  - unused_optional_binding
+
+included:
+  - Wiggler
+  - WigglerCore/Package.swift
+  - WigglerCore/Sources
+  - WigglerCore/Tests

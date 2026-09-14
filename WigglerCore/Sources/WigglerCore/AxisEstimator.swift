@@ -37,7 +37,11 @@ public struct ChordConstraint {
     public var midpoint: V3
     public var chord: V3
     public var frame: Int
-    public init(midpoint: V3, chord: V3, frame: Int) { self.midpoint = midpoint; self.chord = chord; self.frame = frame }
+    public init(midpoint: V3, chord: V3, frame: Int) {
+        self.midpoint = midpoint
+        self.chord = chord
+        self.frame = frame
+    }
 }
 
 public struct AxisEstimate {
@@ -108,12 +112,18 @@ public struct AxisEstimator {
                 let w = weights[i] * lengths[i] * lengths[i]
                 if w <= 0 { continue }
                 let u = units[i]
-                m.m[0] += w * u.x * u.x; m.m[1] += w * u.x * u.y; m.m[2] += w * u.x * u.z
-                m.m[4] += w * u.y * u.y; m.m[5] += w * u.y * u.z; m.m[8] += w * u.z * u.z
+                m.m[0] += w * u.x * u.x
+                m.m[1] += w * u.x * u.y
+                m.m[2] += w * u.x * u.z
+                m.m[4] += w * u.y * u.y
+                m.m[5] += w * u.y * u.z
+                m.m[8] += w * u.z * u.z
                 totalW += w
             }
             if totalW <= 0 { return nil }
-            m.m[3] = m.m[1]; m.m[6] = m.m[2]; m.m[7] = m.m[5]
+            m.m[3] = m.m[1]
+            m.m[6] = m.m[2]
+            m.m[7] = m.m[5]
             let (values, vectors) = m.symmetricEigen()
             evals = values.map { $0 / totalW }
             let dir = vectors[0].normalized
@@ -136,7 +146,12 @@ public struct AxisEstimator {
                 let r1 = abs(units[i].dot(dir)) * lengths[i]
                 let r2 = abs((cs[i].midpoint - center).dot(units[i]))
                 let r = (r1 * r1 + r2 * r2).squareRoot()
-                if r < hub { weights[i] = 1; inliers += 1 } else { weights[i] = hub / r }
+                if r < hub {
+                    weights[i] = 1
+                    inliers += 1
+                } else {
+                    weights[i] = hub / r
+                }
             }
             inlierRatio = Double(inliers) / Double(n)
         }

@@ -78,7 +78,10 @@ public struct HarmonicMap {
     @discardableResult
     public mutating func add(image: GrayImage, theta: Double) -> Bool {
         precondition(image.width == width && image.height == height)
-        guard let prev = thetaPrev else { thetaPrev = theta; return true }
+        guard let prev = thetaPrev else {
+            thetaPrev = theta
+            return true
+        }
         let dth = theta - prev
         thetaPrev = theta
         if abs(dth) > .pi / 2 {

@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import WigglerCore
 
 final class HarmonicMapTests: XCTestCase {
@@ -19,7 +20,8 @@ final class HarmonicMapTests: XCTestCase {
             // 5° ± 4° per frame, with a reversal in the middle.
             theta += (k < 300 ? 1 : -1) * (5 + 4 * rng.uniform(-1, 1)) * .pi / 180
             let px = (0..<n).map { i in
-                Float(mean + trend * theta + orders.reduce(0) { $0 + amp(i, $1) * cos(Double($1) * theta - phi(i, $1)) })
+                Float(
+                    mean + trend * theta + orders.reduce(0) { $0 + amp(i, $1) * cos(Double($1) * theta - phi(i, $1)) })
             }
             XCTAssertTrue(map.add(image: GrayImage(width: w, height: h, pixels: px), theta: theta))
         }
@@ -35,7 +37,10 @@ final class HarmonicMapTests: XCTestCase {
             for i in 0..<n {
                 let v = amp(i, l) * cos(Double(l) * theta - phi(i, l))
                 XCTAssertEqual(Int(img[4 * i + 3]), Int(min(1, abs(v) / 0.1) * 255 + 0.5), accuracy: 2)
-                if abs(v) > 0.002 { XCTAssertEqual(img[4 * i] > 0, v > 0); XCTAssertEqual(img[4 * i + 2] > 0, v < 0) }
+                if abs(v) > 0.002 {
+                    XCTAssertEqual(img[4 * i] > 0, v > 0)
+                    XCTAssertEqual(img[4 * i + 2] > 0, v < 0)
+                }
             }
         }
         XCTAssertNil(map.coefficients(order: 4))
@@ -45,10 +50,16 @@ final class HarmonicMapTests: XCTestCase {
         var map = HarmonicMap(width: 2, height: 1)
         let img = GrayImage(width: 2, height: 1, fill: 0.5)
         var theta = 0.0
-        for _ in 0..<30 { theta += 0.1; map.add(image: img, theta: theta) }
+        for _ in 0..<30 {
+            theta += 0.1
+            map.add(image: img, theta: theta)
+        }
         XCTAssertFalse(map.hasFullTurn)
         XCTAssertNil(map.coefficients(order: 1))
-        for _ in 0..<40 { theta += 0.1; map.add(image: img, theta: theta) }
+        for _ in 0..<40 {
+            theta += 0.1
+            map.add(image: img, theta: theta)
+        }
         XCTAssertTrue(map.hasFullTurn)
         XCTAssertNotNil(map.coefficients(order: 1))
         XCTAssertFalse(map.add(image: img, theta: theta + 2))

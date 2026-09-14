@@ -1,0 +1,9 @@
+repos:
+  - repo: local
+    hooks:
+      - id: swift-quality
+        name: Swift lint and format check
+        entry: tools/swift-quality check
+        language: system
+        pass_filenames: false
+        files: '(^Wiggler/.*\.swift$|^WigglerCore/(Package\.swift$|(Sources|Tests)/.*\.swift$)|^\.swiftlint\.yml$|^\.swift-format$|^tools/swift-quality$|^\.pre-commit-config\.yaml$)'

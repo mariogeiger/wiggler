@@ -13,6 +13,6 @@ let package = Package(
             // The tracker is CPU-bound; keep the optimiser on in Debug builds too (an unoptimised build is ~20x slower).
             swiftSettings: [.unsafeFlags(["-O"], .when(configuration: .debug))]
         ),
-        .testTarget(name: "WigglerCoreTests", dependencies: ["WigglerCore"])
+        .testTarget(name: "WigglerCoreTests", dependencies: ["WigglerCore"]),
     ]
 )

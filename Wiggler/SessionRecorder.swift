@@ -32,8 +32,9 @@ final class SessionRecorder {
     }
 
     func status(now: Double) -> Status {
-        Status(recording: isRecording, seconds: startTime.map { now - $0 } ?? 0,
-               megabytes: Double(written) / 1_048_576, frames: frames, fileName: url?.lastPathComponent ?? "")
+        Status(
+            recording: isRecording, seconds: startTime.map { now - $0 } ?? 0,
+            megabytes: Double(written) / 1_048_576, frames: frames, fileName: url?.lastPathComponent ?? "")
     }
 
     static var documentsDirectory: URL {
@@ -62,8 +63,10 @@ final class SessionRecorder {
         sessionURLs.append(u)
         written = 0
         fileIndex += 1
-        let header: [String: Any] = ["version": 1, "width": FrameConverter.engineWidth, "height": FrameConverter.engineHeight,
-                                     "session": sessionName, "part": fileIndex - 1]
+        let header: [String: Any] = [
+            "version": 1, "width": FrameConverter.engineWidth, "height": FrameConverter.engineHeight,
+            "session": sessionName, "part": fileIndex - 1,
+        ]
         writeChunk(try! JSONSerialization.data(withJSONObject: header))
     }
 
@@ -75,8 +78,10 @@ final class SessionRecorder {
     }
 
     /// Called on the frame queue; copies what it needs and returns immediately.
-    func append(input: FrameInput, luma8: [UInt8], output: EngineOutput, marker: CGPoint?, roiRadius: Float,
-                droppedFrames: Int = 0, processedFps: Double = 0) {
+    func append(
+        input: FrameInput, luma8: [UInt8], output: EngineOutput, marker: CGPoint?, roiRadius: Float,
+        droppedFrames: Int = 0, processedFps: Double = 0
+    ) {
         guard handle != nil else { return }
         if startTime == nil { startTime = input.timestamp }
         let pose = input.cameraToWorld

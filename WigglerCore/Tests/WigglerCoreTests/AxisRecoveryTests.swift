@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import WigglerCore
 
 final class AxisRecoveryTests: XCTestCase {
@@ -98,7 +99,8 @@ final class AxisRecoveryTests: XCTestCase {
     func testDepthBearingBodyHandoffWithinOneRegionDiscardsOldAxis() {
         var left = SyntheticScene(center: V3(-0.13, 0, -0.9), normal: V3(0, 0, 1), radius: 0.11)
         var right = SyntheticScene(seed: 17, center: V3(0.13, 0, -0.9), normal: V3(0, 0, 1), radius: 0.11)
-        left.background = []; right.background = []
+        left.background = []
+        right.background = []
         var rng = LCG(seed: 59)
         let engine = RotationEngine()
         var before = EngineOutput(), after = EngineOutput()
@@ -106,8 +108,9 @@ final class AxisRecoveryTests: XCTestCase {
         for f in 0..<850 {
             var input = left.render(theta: Double(min(f, 349)) * 0.04, depthNoise: 0, rng: &rng)
             let other = right.render(theta: Double(max(0, f - 350)) * 0.04, depthNoise: 0, rng: &rng)
-            input.image = GrayImage(width: input.image.width, height: input.image.height,
-                                    pixels: zip(input.image.pixels, other.image.pixels).map { min(1, max(0, $0 + $1 - 0.5)) })
+            input.image = GrayImage(
+                width: input.image.width, height: input.image.height,
+                pixels: zip(input.image.pixels, other.image.pixels).map { min(1, max(0, $0 + $1 - 0.5)) })
             input.depth!.depth = zip(input.depth!.depth, other.depth!.depth).map { min($0, $1) }
             input.timestamp = Double(f) / 60
             let out = engine.process(input)

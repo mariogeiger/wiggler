@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import WigglerCore
 
 final class MotionLocatorTests: XCTestCase {
@@ -17,7 +18,10 @@ final class MotionLocatorTests: XCTestCase {
             input.timestamp = Double(f) / 60
             let out = engine.process(input)
             if f < 60 { XCTAssertNil(out.marker, "marker placed on a static scene at frame \(f)") }
-            if placedAt == nil, let m = out.marker { placedAt = f; marker = m }
+            if placedAt == nil, let m = out.marker {
+                placedAt = f
+                marker = m
+            }
         }
         guard let at = placedAt, let m = marker else { return XCTFail("marker never placed") }
         XCTAssertLessThan(at, 60 + 90, "took \(at - 60) frames after motion started")

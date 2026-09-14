@@ -14,7 +14,11 @@ final class PointTracks {
         var height = 0.0
         var lastDepth = 0.0
         var depthRejects = 0
-        init(id: Int, x: Float, y: Float) { self.id = id; self.x = x; self.y = y }
+        init(id: Int, x: Float, y: Float) {
+            self.id = id
+            self.x = x
+            self.y = y
+        }
     }
 
     private var tracks: [Track] = []
@@ -46,20 +50,23 @@ final class PointTracks {
             } else {
                 t = Track(id: p.id, x: p.x, y: p.y)
             }
-            t.x = p.x; t.y = p.y
+            t.x = p.x
+            t.y = p.y
             return t
         }
         return (before, after)
     }
 
-    func sampleDepth(_ input: FrameInput, pose: RigidTransform, frame: Int,
-                     minConfidence: UInt8, maxJumpFraction: Double, historyLength: Int) {
+    func sampleDepth(
+        _ input: FrameInput, pose: RigidTransform, frame: Int,
+        minConfidence: UInt8, maxJumpFraction: Double, historyLength: Int
+    ) {
         let w = Double(input.image.width), h = Double(input.image.height)
         let K = input.intrinsics
         for t in tracks {
             t.hasDepthThisFrame = false
             guard let depth = input.depth,
-                  let z = depth.sample(u: Double(t.x) / w, v: Double(t.y) / h, minConfidence: minConfidence)
+                let z = depth.sample(u: Double(t.x) / w, v: Double(t.y) / h, minConfidence: minConfidence)
             else { continue }
             if t.lastDepth > 0 && abs(z - t.lastDepth) > maxJumpFraction * t.lastDepth {
                 t.depthRejects += 1
@@ -102,7 +109,8 @@ final class PointTracks {
         observations.reserveCapacity(tracks.count)
         for t in tracks where t.hasDepthThisFrame {
             let (phi, r, height) = axis.cylindrical(t.samples[t.samples.count - 1].p)
-            t.radius = r; t.height = height
+            t.radius = r
+            t.height = height
             if r > 0.005 { observations.append(AngleObservation(id: t.id, phi: phi, radius: r)) }
         }
         return observations
@@ -131,10 +139,15 @@ final class PointTracks {
     func debug(hasAxis: Bool, isConsistent: (Int) -> Bool) -> [TrackDebug] {
         tracks.map { t in
             let status: TrackStatus
-            if t.age < 3 { status = .young }
-            else if !t.hasDepthThisFrame { status = .noDepth }
-            else if hasAxis && !isConsistent(t.id) { status = .inconsistent }
-            else { status = .good }
+            if t.age < 3 {
+                status = .young
+            } else if !t.hasDepthThisFrame {
+                status = .noDepth
+            } else if hasAxis && !isConsistent(t.id) {
+                status = .inconsistent
+            } else {
+                status = .good
+            }
             return TrackDebug(x: t.x, y: t.y, status: status)
         }
     }

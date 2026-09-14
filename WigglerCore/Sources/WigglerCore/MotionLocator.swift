@@ -48,9 +48,11 @@ public struct MotionLocator {
 
     /// Returns an established moving region. `retaining` protects measurement tracks during a pause;
     /// unselected static probes expire so background texture cannot exhaust the search budget.
-    public mutating func add(image: GrayImage, prev: Pyramid?, cur: Pyramid, pose: RigidTransform?, dt: Double,
-                             time: Double, radius: Float, klt: KLTTracker, corners: CornerDetector,
-                             retaining: Set<Int> = []) -> (x: Float, y: Float)? {
+    public mutating func add(
+        image: GrayImage, prev: Pyramid?, cur: Pyramid, pose: RigidTransform?, dt: Double,
+        time: Double, radius: Float, klt: KLTTracker, corners: CornerDetector,
+        retaining: Set<Int> = []
+    ) -> (x: Float, y: Float)? {
         frame += 1
         let w = Float(image.width), h = Float(image.height)
         motionValid = pose != nil && dt > 0 && dt < 0.5
@@ -63,7 +65,8 @@ public struct MotionLocator {
             if span >= cameraWindow / 2 {
                 let dR = old.pose.rotation.transposed * p.rotation
                 let cosA = max(-1, min(1, (dR.m[0] + dR.m[4] + dR.m[8] - 1) / 2))
-                motionValid = motionValid && acos(cosA) <= maxCameraRotationRate * span
+                motionValid =
+                    motionValid && acos(cosA) <= maxCameraRotationRate * span
                     && (p.translation - old.pose.translation).length <= maxCameraSpeed * span
             } else {
                 motionValid = false
@@ -78,10 +81,13 @@ public struct MotionLocator {
                 var pt = pt
                 let r = klt.track(prev: prev, cur: cur, x: pt.x, y: pt.y)
                 guard r.ok, r.residual <= maxResidual, r.x > border, r.y > border,
-                      r.x < w - border, r.y < h - border else { return nil }
+                    r.x < w - border, r.y < h - border
+                else { return nil }
                 let dx = r.x - pt.x, dy = r.y - pt.y
-                pt.previousX = pt.x; pt.previousY = pt.y
-                pt.x = r.x; pt.y = r.y
+                pt.previousX = pt.x
+                pt.previousY = pt.y
+                pt.x = r.x
+                pt.y = r.y
                 pt.duration += max(0, dt)
                 if motionValid {
                     let v = (dx * dx + dy * dy).squareRoot() / Float(dt)
@@ -113,11 +119,14 @@ public struct MotionLocator {
         let moving = points.filter { $0.speed > movingSpeed && $0.duration >= 0.1 }
         movingCount = motionValid ? moving.count : 0
         guard motionValid, moving.count >= minMoving,
-              let centre = Self.mode(of: moving.map { ($0.x, $0.y) }, radius: radius, minCount: minMoving) else {
+            let centre = Self.mode(of: moving.map { ($0.x, $0.y) }, radius: radius, minCount: minMoving)
+        else {
             candidate = nil
             return nil
         }
-        if let c = candidate, (c.x - centre.x) * (c.x - centre.x) + (c.y - centre.y) * (c.y - centre.y) < radius * radius / 4 {
+        if let c = candidate,
+            (c.x - centre.x) * (c.x - centre.x) + (c.y - centre.y) * (c.y - centre.y) < radius * radius / 4
+        {
             return time - candidateSince >= settleSeconds ? centre : nil
         }
         candidate = centre
@@ -139,14 +148,15 @@ public struct MotionLocator {
             return moving(p) ? 1 : 0
         }
         let hasMotion = nearby.filter { moving($0) }.count >= minMoving
-        return Array(nearby.filter {
-            moving($0) || (retaining.contains($0.id) && (!hasMotion || $0.stillFor < 0.5))
-        }.sorted {
-            let a = rank($0), b = rank($1)
-            if a != b { return a > b }
-            if $0.speed != $1.speed { return $0.speed > $1.speed }
-            return $0.id < $1.id
-        }.prefix(max(0, limit)))
+        return Array(
+            nearby.filter {
+                moving($0) || (retaining.contains($0.id) && (!hasMotion || $0.stillFor < 0.5))
+            }.sorted {
+                let a = rank($0), b = rank($1)
+                if a != b { return a > b }
+                if $0.speed != $1.speed { return $0.speed > $1.speed }
+                return $0.id < $1.id
+            }.prefix(max(0, limit)))
     }
 
     private mutating func replenish(image: GrayImage, corners: CornerDetector) {
@@ -160,8 +170,9 @@ public struct MotionLocator {
             tile = (tile + 1) % (columns * rows)
             let count = min(quota, maxPoints - points.count)
             guard count > 0 else { continue }
-            let fresh = corners.detect(in: image, centerX: x, centerY: y, radius: radius,
-                                       exclude: points.map { ($0.x, $0.y) }, maxCount: count)
+            let fresh = corners.detect(
+                in: image, centerX: x, centerY: y, radius: radius,
+                exclude: points.map { ($0.x, $0.y) }, maxCount: count)
             for (x, y) in fresh {
                 points.append(Point(id: nextID, x: x, y: y, previousX: x, previousY: y))
                 nextID += 1
@@ -176,15 +187,25 @@ public struct MotionLocator {
         for (x, y) in pts { counts[Int(x / cell) &* 4096 &+ Int(y / cell), default: 0] += 1 }
         guard let best = counts.keys.sorted().max(by: { counts[$0]! < counts[$1]! }) else { return nil }
         var cx: Float = 0, cy: Float = 0, n: Float = 0
-        for (x, y) in pts where Int(x / cell) &* 4096 &+ Int(y / cell) == best { cx += x; cy += y; n += 1 }
-        cx /= n; cy /= n
+        for (x, y) in pts where Int(x / cell) &* 4096 &+ Int(y / cell) == best {
+            cx += x
+            cy += y
+            n += 1
+        }
+        cx /= n
+        cy /= n
         var inside = 0
         for _ in 0..<4 {
             var sx: Float = 0, sy: Float = 0
             inside = 0
-            for (x, y) in pts where (x - cx) * (x - cx) + (y - cy) * (y - cy) < radius * radius { sx += x; sy += y; inside += 1 }
+            for (x, y) in pts where (x - cx) * (x - cx) + (y - cy) * (y - cy) < radius * radius {
+                sx += x
+                sy += y
+                inside += 1
+            }
             if inside == 0 { return nil }
-            cx = sx / Float(inside); cy = sy / Float(inside)
+            cx = sx / Float(inside)
+            cy = sy / Float(inside)
         }
         return inside >= minCount ? (cx, cy) : nil
     }

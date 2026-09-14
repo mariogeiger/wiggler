@@ -1,4 +1,5 @@
 import Foundation
+
 @testable import WigglerCore
 
 /// Deterministic pseudo-random generator so tests are reproducible.
@@ -26,11 +27,12 @@ struct SyntheticScene {
     let normal: V3
     let e1: V3, e2: V3
     let radius: Double
-    var blobs: [(r: Double, a: Double, h: Double, intensity: Double)] = []   // disk points in cylindrical coords
+    var blobs: [(r: Double, a: Double, h: Double, intensity: Double)] = []  // disk points in cylindrical coords
     var background: [(V3, Double)] = []
     var rng: LCG
 
-    init(seed: UInt64 = 7, center: V3 = V3(0.05, -0.05, -0.75), normal: V3 = V3(0.25, 0.55, 0.8), radius: Double = 0.15) {
+    init(seed: UInt64 = 7, center: V3 = V3(0.05, -0.05, -0.75), normal: V3 = V3(0.25, 0.55, 0.8), radius: Double = 0.15)
+    {
         self.center = center
         self.normal = normal.normalized
         self.e1 = self.normal.anyOrthogonal()
@@ -40,7 +42,7 @@ struct SyntheticScene {
         for _ in 0..<500 {
             let r = radius * rng.next().squareRoot()
             let a = rng.uniform(0, 2 * .pi)
-            let h = rng.uniform(-0.01, 0.01) // slight relief
+            let h = rng.uniform(-0.01, 0.01)  // slight relief
             blobs.append((r, a, h, rng.uniform(-0.45, 0.45)))
         }
         for _ in 0..<300 {
@@ -108,6 +110,7 @@ struct SyntheticScene {
             conf[k] = 0
         }
         let dm = DepthMap(width: depthWidth, height: depthHeight, depth: depth, confidence: conf)
-        return FrameInput(image: img, intrinsics: intrinsics, cameraToWorld: .identity, poseValid: true, depth: dm, timestamp: 0)
+        return FrameInput(
+            image: img, intrinsics: intrinsics, cameraToWorld: .identity, poseValid: true, depth: dm, timestamp: 0)
     }
 }

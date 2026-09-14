@@ -26,7 +26,7 @@ public struct KLTTracker {
         let n = side * side
         let topScale = Float(1 << (levelCount - 1))
         var px = x / topScale, py = y / topScale  // position in current level (prev image)
-        var gx: Float = 0, gy: Float = 0          // displacement estimate in current level
+        var gx: Float = 0, gy: Float = 0  // displacement estimate in current level
 
         var template = [Float](repeating: 0, count: n)
         var ix = [Float](repeating: 0, count: n)
@@ -40,7 +40,10 @@ public struct KLTTracker {
             if px < margin || py < margin || px > Float(P.width - 1) - margin || py > Float(P.height - 1) - margin {
                 if lvl == 0 { return KLTResult(x: x, y: y, ok: false, residual: .infinity) }
                 // Too close to the border at this coarse level: skip it and refine at the next finer level.
-                px *= 2; py *= 2; gx *= 2; gy *= 2
+                px *= 2
+                py *= 2
+                gx *= 2
+                gy *= 2
                 continue
             }
             var gxx: Float = 0, gxy: Float = 0, gyy: Float = 0
@@ -51,8 +54,11 @@ public struct KLTTracker {
                     template[i] = P.bilinear(sx, sy)
                     let gxv = 0.5 * (P.bilinear(sx + 1, sy) - P.bilinear(sx - 1, sy))
                     let gyv = 0.5 * (P.bilinear(sx, sy + 1) - P.bilinear(sx, sy - 1))
-                    ix[i] = gxv; iy[i] = gyv
-                    gxx += gxv * gxv; gxy += gxv * gyv; gyy += gyv * gyv
+                    ix[i] = gxv
+                    iy[i] = gyv
+                    gxx += gxv * gxv
+                    gxy += gxv * gyv
+                    gyy += gyv * gyv
                     i += 1
                 }
             }
@@ -73,17 +79,22 @@ public struct KLTTracker {
                 for dy in -half...half {
                     for dx in -half...half {
                         let d = C.bilinear(cx + Float(dx), cy + Float(dy)) - template[k]
-                        bx += ix[k] * d; by += iy[k] * d
+                        bx += ix[k] * d
+                        by += iy[k] * d
                         k += 1
                     }
                 }
                 let ux = -(gyy * bx - gxy * by) * invDet
                 let uy = -(-gxy * bx + gxx * by) * invDet
-                gx += ux; gy += uy
+                gx += ux
+                gy += uy
                 if ux * ux + uy * uy < epsilon * epsilon { break }
             }
             if lvl > 0 {
-                px *= 2; py *= 2; gx *= 2; gy *= 2
+                px *= 2
+                py *= 2
+                gx *= 2
+                gy *= 2
             }
         }
         let nx = px + gx, ny = py + gy

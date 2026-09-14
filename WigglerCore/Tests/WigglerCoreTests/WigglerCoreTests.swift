@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import WigglerCore
 
 final class GeometryTests: XCTestCase {
@@ -28,7 +29,7 @@ final class GeometryTests: XCTestCase {
     }
 
     func testRigidTransformInverse() {
-        let m: [Double] = [0, 1, 0, 0,  -1, 0, 0, 0,  0, 0, 1, 0,  1, 2, 3, 1]  // column-major: 90° about z + translation
+        let m: [Double] = [0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1, 0, 1, 2, 3, 1]  // column-major: 90° about z + translation
         let t = RigidTransform(columnMajor4x4: m)
         let p = V3(0.3, -0.7, 2)
         let q = t.inverse.apply(t.apply(p))
@@ -46,30 +47,36 @@ final class KLTTests: XCTestCase {
         for _ in 0..<800 {
             let cx = rng.uniform(4, Double(w + 36)), cy = rng.uniform(4, Double(h + 36))
             let i = rng.uniform(-0.4, 0.4)
-            for y in Int(cy) - 4...Int(cy) + 4 { for x in Int(cx) - 4...Int(cx) + 4 {
-                let dx = Double(x) - cx, dy = Double(y) - cy
-                base[y * (w + 40) + x] += Float(i * exp(-(dx * dx + dy * dy) / 5))
-            } }
+            for y in Int(cy) - 4...Int(cy) + 4 {
+                for x in Int(cx) - 4...Int(cx) + 4 {
+                    let dx = Double(x) - cx, dy = Double(y) - cy
+                    base[y * (w + 40) + x] += Float(i * exp(-(dx * dx + dy * dy) / 5))
+                }
+            }
         }
         func warp(tx: Double, ty: Double, ang: Double) -> GrayImage {
             var out = GrayImage(width: w, height: h)
             let c = cos(ang), s = sin(ang)
-            for y in 0..<h { for x in 0..<w {
-                let dx = Double(x) - tx - Double(w) / 2, dy = Double(y) - ty - Double(h) / 2
-                let sx = c * dx + s * dy + Double(w) / 2 + 20, sy = -s * dx + c * dy + Double(h) / 2 + 20
-                let x0 = Int(sx), y0 = Int(sy)
-                let fx = Float(sx - Double(x0)), fy = Float(sy - Double(y0))
-                let W = w + 40
-                let a = base[y0 * W + x0], b = base[y0 * W + x0 + 1], cc = base[(y0 + 1) * W + x0], d = base[(y0 + 1) * W + x0 + 1]
-                out.pixels[y * w + x] = (a * (1 - fx) + b * fx) * (1 - fy) + (cc * (1 - fx) + d * fx) * fy
-            } }
+            for y in 0..<h {
+                for x in 0..<w {
+                    let dx = Double(x) - tx - Double(w) / 2, dy = Double(y) - ty - Double(h) / 2
+                    let sx = c * dx + s * dy + Double(w) / 2 + 20, sy = -s * dx + c * dy + Double(h) / 2 + 20
+                    let x0 = Int(sx), y0 = Int(sy)
+                    let fx = Float(sx - Double(x0)), fy = Float(sy - Double(y0))
+                    let W = w + 40
+                    let a = base[y0 * W + x0], b = base[y0 * W + x0 + 1], cc = base[(y0 + 1) * W + x0],
+                        d = base[(y0 + 1) * W + x0 + 1]
+                    out.pixels[y * w + x] = (a * (1 - fx) + b * fx) * (1 - fy) + (cc * (1 - fx) + d * fx) * fy
+                }
+            }
             return out
         }
         let (tx, ty, ang) = (6.3, -4.7, 3.0 * Double.pi / 180)
         let imgA = warp(tx: 0, ty: 0, ang: 0), imgB = warp(tx: tx, ty: ty, ang: ang)
         let pa = Pyramid(image: imgA, levelCount: 4), pb = Pyramid(image: imgB, levelCount: 4)
         let det = CornerDetector()
-        let pts = det.detect(in: imgA, centerX: Float(w) / 2, centerY: Float(h) / 2, radius: 70, exclude: [], maxCount: 60)
+        let pts = det.detect(
+            in: imgA, centerX: Float(w) / 2, centerY: Float(h) / 2, radius: 70, exclude: [], maxCount: 60)
         XCTAssertGreaterThan(pts.count, 30)
         let klt = KLTTracker()
         var errors: [Double] = []
@@ -79,7 +86,8 @@ final class KLTTests: XCTestCase {
             guard r.ok, r.residual < 0.12 else { continue }
             let ex = c * (Double(x) - Double(w) / 2) - s * (Double(y) - Double(h) / 2) + Double(w) / 2 + tx
             let ey = s * (Double(x) - Double(w) / 2) + c * (Double(y) - Double(h) / 2) + Double(h) / 2 + ty
-            errors.append(((Double(r.x) - ex) * (Double(r.x) - ex) + (Double(r.y) - ey) * (Double(r.y) - ey)).squareRoot())
+            errors.append(
+                ((Double(r.x) - ex) * (Double(r.x) - ex) + (Double(r.y) - ey) * (Double(r.y) - ey)).squareRoot())
         }
         XCTAssertGreaterThan(errors.count, 25)
         XCTAssertLessThan(median(errors), 0.3)
@@ -95,7 +103,8 @@ final class AxisAndAngleTests: XCTestCase {
         var pts: [(r: Double, a: Double, h: Double)] = []
         for _ in 0..<120 { pts.append((rng.uniform(0.03, 0.2), rng.uniform(0, 2 * .pi), rng.uniform(-0.1, 0.1))) }
         func pos(_ p: (r: Double, a: Double, h: Double), _ th: Double) -> V3 {
-            axTrue.origin + axTrue.direction * p.h + axTrue.e1 * (p.r * cos(p.a + th)) + axTrue.e2 * (p.r * sin(p.a + th))
+            axTrue.origin + axTrue.direction * p.h + axTrue.e1 * (p.r * cos(p.a + th)) + axTrue.e2
+                * (p.r * sin(p.a + th))
         }
         var est = AxisEstimator()
         var theta = 0.0
@@ -103,9 +112,14 @@ final class AxisAndAngleTests: XCTestCase {
         for t in 0..<240 {
             theta += (2 * .pi * 100 / 60 / 60) * pow(sin(Double(t) / 80), 2)
             var frame: [V3] = []
-            for p in pts { frame.append(pos(p, theta) + V3(rng.gaussian(0.006), rng.gaussian(0.006), rng.gaussian(0.006))) }
+            for p in pts {
+                frame.append(pos(p, theta) + V3(rng.gaussian(0.006), rng.gaussian(0.006), rng.gaussian(0.006)))
+            }
             // outliers: random walkers ("hands")
-            for k in 0..<10 { frame.append(V3(0.3 + Double(k) * 0.01 + rng.gaussian(0.02), rng.gaussian(0.02), 0.8 + rng.gaussian(0.02))) }
+            for k in 0..<10 {
+                frame.append(
+                    V3(0.3 + Double(k) * 0.01 + rng.gaussian(0.02), rng.gaussian(0.02), 0.8 + rng.gaussian(0.02)))
+            }
             history.append(frame)
             if t > 0 {
                 for i in 0..<frame.count {
@@ -132,13 +146,16 @@ final class AxisAndAngleTests: XCTestCase {
         var rng = LCG(seed: 5)
         let ax = Axis(origin: V3(0, 0, 0), direction: V3(0, 0, 1))
         var offsets: [Double] = [], radii: [Double] = []
-        for _ in 0..<80 { offsets.append(rng.uniform(0, 2 * .pi)); radii.append(rng.uniform(0.03, 0.2)) }
+        for _ in 0..<80 {
+            offsets.append(rng.uniform(0, 2 * .pi))
+            radii.append(rng.uniform(0.03, 0.2))
+        }
         var tracker = AngleTracker()
         var theta = 0.0
         var maxErr = 0.0
         var hands: [Double] = (0..<8).map { _ in rng.uniform(0, 2 * .pi) }
         for t in 0..<400 {
-            theta += (2 * .pi * 100 / 60 / 60) * pow(sin(Double(t) / 60), 2)   // up to 100 rpm at 60 fps
+            theta += (2 * .pi * 100 / 60 / 60) * pow(sin(Double(t) / 60), 2)  // up to 100 rpm at 60 fps
             var obs: [AngleObservation] = []
             for i in 0..<80 {
                 let noise = rng.gaussian(0.006) / radii[i]  // ~6 mm position noise
@@ -190,12 +207,16 @@ final class AxisAndAngleTests: XCTestCase {
 
         // A body of revolution: the patch does not depend on θ beyond sensor noise.
         var sym = Relocalizer(side: 8, binCount: 36)
-        for b in 0..<36 { sym.record(patch: bg.map { $0 + Float(rng.gaussian(0.01)) }, theta: Double(b) * 10 * .pi / 180) }
+        for b in 0..<36 {
+            sym.record(patch: bg.map { $0 + Float(rng.gaussian(0.01)) }, theta: Double(b) * 10 * .pi / 180)
+        }
         XCTAssertTrue(sym.isRotationallySymmetric)
         XCTAssertEqual(sym.period, 0)
         // Fine texture decorrelates within one bin but is not symmetry: the appearance still depends on θ.
         var fine = Relocalizer(side: 8, binCount: 36)
-        for b in 0..<36 { fine.record(patch: (0..<64).map { _ in Float(rng.uniform(0, 1)) }, theta: Double(b) * 10 * .pi / 180) }
+        for b in 0..<36 {
+            fine.record(patch: (0..<64).map { _ in Float(rng.uniform(0, 1)) }, theta: Double(b) * 10 * .pi / 180)
+        }
         XCTAssertFalse(fine.isRotationallySymmetric)
         XCTAssertEqual(fine.period, 2 * .pi, accuracy: 1e-9)
     }
@@ -238,7 +259,9 @@ final class EngineEndToEndTests: XCTestCase {
                 maxErr = max(maxErr, err)
             }
         }
-        XCTAssertNotNil(lockedAt, "engine never locked: \(last.message) tracks=\(last.trackCount) constraints=\(last.constraintCount)")
+        XCTAssertNotNil(
+            lockedAt,
+            "engine never locked: \(last.message) tracks=\(last.trackCount) constraints=\(last.constraintCount)")
         guard let axis = last.axis else { return XCTFail("no axis") }
         let dirErr = acos(abs(axis.direction.dot(scene.normal))) * 180 / .pi
         XCTAssertLessThan(dirErr, 3, "axis direction error \(dirErr)°")

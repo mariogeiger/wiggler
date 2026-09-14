@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+    echo "Usage: $0 {check|format}"
+}
+
+if [[ $# != 1 ]]; then
+    usage >&2
+    exit 2
+fi
+case "$1" in
+    check) access=ro ;;
+    format) access=rw ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage >&2; exit 2 ;;
+esac
+
+if ! command -v docker >/dev/null 2>&1; then
+    echo "Docker is required. Install it and start the Docker daemon." >&2
+    exit 1
+fi
+
+root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+swift_paths=(Wiggler WigglerCore/Package.swift WigglerCore/Sources WigglerCore/Tests)
+container=(docker run --rm --memory=1g --memory-swap=1g --cpus=2
+    --user "$(id -u):$(id -g)" --env HOME=/tmp
+    --volume "$root:/src:$access" --workdir /src)
+
+# Swift 6.2.4 (swift:6.2-noble) and SwiftLint 0.65.1.
+swift_image=swift@sha256:9f82fca7d577f78772c1ef0c38392f9bee05d92c8483f903005cded067ded5ee
+swiftlint_image=ghcr.io/realm/swiftlint@sha256:f47e083201e47a136cda5ae847595bfe00226c444ca226fa74fa5dc648a9b057
+
+if [[ $1 == format ]]; then
+    "${container[@]}" "$swift_image" swift format format \
+        --configuration .swift-format --in-place --recursive "${swift_paths[@]}"
+else
+    status=0
+    "${container[@]}" "$swift_image" swift format lint \
+        --configuration .swift-format --strict --recursive "${swift_paths[@]}" || status=1
+    "${container[@]}" "$swiftlint_image" lint \
+        --config .swiftlint.yml --strict --no-cache --quiet || status=1
+    exit "$status"
+fi

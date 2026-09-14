@@ -55,16 +55,19 @@ public struct AngleFusion {
     }
 
     public enum Outcome: String {
-        case noMeasurement      // nothing to compare against
-        case gated              // a match exists but is outside the gate
-        case ambiguous          // a clearly better match sits outside the gate: do not trust this measurement
-        case updated            // the state was corrected
+        case noMeasurement  // nothing to compare against
+        case gated  // a match exists but is outside the gate
+        case ambiguous  // a clearly better match sits outside the gate: do not trust this measurement
+        case updated  // the state was corrected
     }
 
     public struct Candidate {
         public var theta: Double
         public var score: Double
-        public init(theta: Double, score: Double) { self.theta = theta; self.score = score }
+        public init(theta: Double, score: Double) {
+            self.theta = theta
+            self.score = score
+        }
     }
 
     /// - Parameters:
@@ -74,8 +77,10 @@ public struct AngleFusion {
     ///     image-plane rotation agrees with the geometric increment).
     ///   - candidates: appearance matches, any order.
     /// - Returns: the correction to apply to theta this frame (always bounded), and what happened.
-    public mutating func update(theta: Double, omega: Double, healthy: Bool,
-                                candidates: [Candidate], dt: Double) -> (correction: Double, outcome: Outcome) {
+    public mutating func update(
+        theta: Double, omega: Double, healthy: Bool,
+        candidates: [Candidate], dt: Double
+    ) -> (correction: Double, outcome: Outcome) {
         if healthy { omegaHeld = omega }
         let w = abs(omegaHeld)
         if healthy {
@@ -92,7 +97,9 @@ public struct AngleFusion {
             // The gate is on the innovation covariance S = P + R, not on P alone: the measurement's own noise
             // (about one bin) is part of what makes an innovation ordinary. Gating on P would, once the state is
             // confident, reject normal measurements and then mistake them for a stale library.
-            func gate(_ c: Candidate) -> Double { min(3 * (sigma * sigma + Self.sigmaM(c) * Self.sigmaM(c)).squareRoot(), .pi) }
+            func gate(_ c: Candidate) -> Double {
+                min(3 * (sigma * sigma + Self.sigmaM(c) * Self.sigmaM(c)).squareRoot(), .pi)
+            }
             let reference = theta + pending
             var bestInside: Candidate?
             var bestOverall: Candidate?
@@ -115,7 +122,8 @@ public struct AngleFusion {
                 // The measurement contradicts the state. Never follow it — and never let it creep in through a
                 // marginal candidate. Only a *strong* disagreement means the library itself is out of date.
                 if healthy, let overall = bestOverall, overall.score > 0.7,
-                   abs(wrapAngle(overall.theta - reference)) > gate(overall) {
+                    abs(wrapAngle(overall.theta - reference)) > gate(overall)
+                {
                     staleSeconds += dt
                 }
                 outcome = bestInside == nil ? .gated : .ambiguous
@@ -148,11 +156,16 @@ public func similarityRotation(from a: [(Float, Float)], to b: [(Float, Float)])
         var sw = 0.0, ax = 0.0, ay = 0.0, bx = 0.0, by = 0.0
         for i in 0..<n {
             sw += w[i]
-            ax += w[i] * Double(a[i].0); ay += w[i] * Double(a[i].1)
-            bx += w[i] * Double(b[i].0); by += w[i] * Double(b[i].1)
+            ax += w[i] * Double(a[i].0)
+            ay += w[i] * Double(a[i].1)
+            bx += w[i] * Double(b[i].0)
+            by += w[i] * Double(b[i].1)
         }
         if sw < 1e-9 { return nil }
-        ax /= sw; ay /= sw; bx /= sw; by /= sw
+        ax /= sw
+        ay /= sw
+        bx /= sw
+        by /= sw
         var num = 0.0, den = 0.0, norm = 0.0
         for i in 0..<n {
             let px = Double(a[i].0) - ax, py = Double(a[i].1) - ay

@@ -1,7 +1,7 @@
 import ARKit
+import Combine
 import SceneKit
 import SwiftUI
-import Combine
 import WigglerCore
 
 /// Owns the ARKit session, feeds every frame to the rotation engine and drives the SceneKit overlay.
@@ -25,7 +25,8 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
     private static let harmonicOrderKey = "harmonicOrder"
     /// Fraction of the first full turn the harmonic map has accumulated (it is drawn from 1).
     @Published private(set) var harmonicProgress = 0.0
-    @Published private(set) var recorderStatus = SessionRecorder.Status(recording: false, seconds: 0, megabytes: 0, frames: 0, fileName: "")
+    @Published private(set) var recorderStatus = SessionRecorder.Status(
+        recording: false, seconds: 0, megabytes: 0, frames: 0, fileName: "")
     /// Set when a recording stops: the view presents the export sheet for it.
     @Published var pendingShare: ShareItem?
 
@@ -55,8 +56,9 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
     private var viewportSize = CGSize(width: 1, height: 1)
     private var lastPublish = Date.distantPast
     // Engine queue. Only stable measurements contribute to the map, even when its display is off.
-    private var harmonics = HarmonicMap(width: FrameConverter.engineWidth, height: FrameConverter.engineHeight,
-                                        orders: ARSessionController.harmonicOrders)
+    private var harmonics = HarmonicMap(
+        width: FrameConverter.engineWidth, height: FrameConverter.engineHeight,
+        orders: ARSessionController.harmonicOrders)
     private var harmonicOrderEngine: Int?
     private var renderedHarmonicImage: CGImage?
     private var lastHarmonicRender = Date.distantPast
@@ -100,7 +102,8 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
         // Prefer the 60 fps 4:3 format of the wide camera.
         let formats = ARWorldTrackingConfiguration.supportedVideoFormats
         if let f = formats.first(where: { $0.framesPerSecond >= 60 && $0.imageResolution.width <= 2000 })
-            ?? formats.first(where: { $0.framesPerSecond >= 60 }) {
+            ?? formats.first(where: { $0.framesPerSecond >= 60 })
+        {
             config.videoFormat = f
         }
         sceneView.session.run(config, options: [.resetTracking, .removeExistingAnchors])
@@ -139,7 +142,8 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
 
     /// Normalised engine image → normalised view coordinates.
     func displayTransform() -> CGAffineTransform {
-        lock.lock(); defer { lock.unlock() }
+        lock.lock()
+        defer { lock.unlock() }
         return latestDisplayTransform
     }
 
@@ -149,7 +153,9 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
         let t = latestDisplayTransform
         let size = viewportSize
         lock.unlock()
-        let n = CGPoint(x: imageX / CGFloat(FrameConverter.engineWidth), y: imageY / CGFloat(FrameConverter.engineHeight)).applying(t)
+        let n = CGPoint(
+            x: imageX / CGFloat(FrameConverter.engineWidth), y: imageY / CGFloat(FrameConverter.engineHeight)
+        ).applying(t)
         return CGPoint(x: n.x * size.width, y: n.y * size.height)
     }
 
@@ -172,7 +178,9 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
             return
         }
         guard let input = converter.convert(frame) else {
-            lock.lock(); engineBusy = false; lock.unlock()
+            lock.lock()
+            engineBusy = false
+            lock.unlock()
             return
         }
         let luma8 = converter.lastLuma8
@@ -193,10 +201,11 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
             lock.unlock()
             frameCounter += 1
             if recorder.isRecording && frameCounter % recordEveryNth == 0 {
-                recorder.append(input: input, luma8: luma8, output: out,
-                                marker: out.marker.map { CGPoint(x: CGFloat($0.x), y: CGFloat($0.y)) },
-                                roiRadius: out.marker?.radius ?? 0,
-                                droppedFrames: droppedFrames, processedFps: processedFps)
+                recorder.append(
+                    input: input, luma8: luma8, output: out,
+                    marker: out.marker.map { CGPoint(x: CGFloat($0.x), y: CGFloat($0.y)) },
+                    roiRadius: out.marker?.radius ?? 0,
+                    droppedFrames: droppedFrames, processedFps: processedFps)
             }
             let now = Date()
             if now.timeIntervalSince(lastPublish) > 1.0 / 30.0 {
@@ -219,7 +228,8 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
         let show = harmonicOrderEngine != nil && out.axisStable && harmonics.hasFullTurn
         if show {
             guard now.timeIntervalSince(lastHarmonicRender) > 1.0 / 15.0, let l = harmonicOrderEngine,
-                  let rgba = harmonics.render(order: l, theta: out.theta, fullScale: harmonicFullScale) else { return }
+                let rgba = harmonics.render(order: l, theta: out.theta, fullScale: harmonicFullScale)
+            else { return }
             lastHarmonicRender = now
             renderedHarmonicImage = CGImage.rgba8(width: harmonics.width, height: harmonics.height, bytes: rgba)
         } else {

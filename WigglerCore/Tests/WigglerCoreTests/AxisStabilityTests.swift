@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import WigglerCore
 
 final class AxisStabilityTests: XCTestCase {
@@ -21,12 +22,18 @@ final class AxisStabilityTests: XCTestCase {
 
     func testAxisComparisonIgnoresSignAndPositionAlongTheLine() {
         let axis = Axis(origin: .zero, direction: V3(0, 1, 0))
-        XCTAssertTrue(AxisStability.agrees(Axis(origin: V3(0, 2, 0), direction: V3(0, -1, 0)),
-                                          with: axis, objectRadius: 0.1))
-        XCTAssertFalse(AxisStability.agrees(Axis(origin: V3(0.1, 0, 0), direction: axis.direction),
-                                           with: axis, objectRadius: 0.1))
-        XCTAssertFalse(AxisStability.agrees(Axis(origin: .zero, direction: V3(1, 1, 0)),
-                                           with: axis, objectRadius: 0.1))
+        XCTAssertTrue(
+            AxisStability.agrees(
+                Axis(origin: V3(0, 2, 0), direction: V3(0, -1, 0)),
+                with: axis, objectRadius: 0.1))
+        XCTAssertFalse(
+            AxisStability.agrees(
+                Axis(origin: V3(0.1, 0, 0), direction: axis.direction),
+                with: axis, objectRadius: 0.1))
+        XCTAssertFalse(
+            AxisStability.agrees(
+                Axis(origin: .zero, direction: V3(1, 1, 0)),
+                with: axis, objectRadius: 0.1))
     }
 
     func testNewBodyChordsRejectAnOldAxis() {

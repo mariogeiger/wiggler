@@ -68,7 +68,8 @@ final class AxisOverlayNode: SCNNode {
         let visible = !hideRay && out.axisStable && out.angleConfidence > 0.15
         rayPivot.isHidden = !visible
         rayPivot.eulerAngles = SCNVector3(0, Float(out.theta), 0)
-        ray.geometry?.firstMaterial?.diffuse.contents = UIColor.orange.withAlphaComponent(CGFloat(0.35 + 0.6 * out.angleConfidence))
+        ray.geometry?.firstMaterial?.diffuse.contents = UIColor.orange.withAlphaComponent(
+            CGFloat(0.35 + 0.6 * out.angleConfidence))
         let axisColor = out.axisStable ? UIColor.green : UIColor.red
         axisLine.geometry?.firstMaterial?.diffuse.contents = axisColor
         axisLine.geometry?.firstMaterial?.emission.contents = axisColor

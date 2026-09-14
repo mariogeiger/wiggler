@@ -34,6 +34,32 @@ A hand-written `Wiggler.xcodeproj` is also provided (XcodeGen is not required). 
 offline with `tools/replay.py`. Fusion strategies can be compared with `tools/fusion.py`, which can also inject
 an occlusion or a stale library to test those two key behaviors.
 
+## Swift lint and formatting
+
+On Linux or macOS, run these commands from the repository root with Docker installed and running:
+
+```bash
+./tools/swift-quality format  # Rewrite Swift files with swift format.
+./tools/swift-quality check   # Check formatting and SwiftLint rules without changing files.
+```
+
+The runner pins Swift 6.2.4 and SwiftLint 0.65.1 container images by digest. The first run downloads them;
+no local Swift installation is needed. Each container is limited to 1 GiB of memory, no extra swap, and two
+CPUs. Files retain the invoking user's ownership. Checks cover the app, package manifest, core sources,
+and tests, but not build output. Run `check` after `format`: SwiftLint findings may need a manual fix.
+
+`swift format` owns layout (four spaces, 120 columns), import ordering, and semicolon removal. Its `rules`
+map is an allowlist; omitted rules are off. SwiftLint checks seven suspicious patterns, not naming or
+complexity limits; mathematical symbols and short variable names are allowed.
+These checks do not replace `swift test` or an iOS build in Xcode.
+
+To enable the optional read-only Git hook, install [pre-commit](https://pre-commit.com/) and run:
+
+```bash
+pre-commit install
+pre-commit run --all-files
+```
+
 ## Usage
 
 1. Mount the phone in portrait orientation with the object in view.

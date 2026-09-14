@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import WigglerCore
 
 final class MotionSelectionTests: XCTestCase {
@@ -38,8 +39,9 @@ final class MotionSelectionTests: XCTestCase {
             var input = left.render(theta: leftTheta, depthNoise: 0, rng: &rng)
             let other = right.render(theta: rightTheta, depthNoise: 0, rng: &rng)
             // Both images have the same pixel axes. Subtract the common 0.5 background once.
-            input.image = GrayImage(width: input.image.width, height: input.image.height,
-                                    pixels: zip(input.image.pixels, other.image.pixels).map { min(1, max(0, $0 + $1 - 0.5)) })
+            input.image = GrayImage(
+                width: input.image.width, height: input.image.height,
+                pixels: zip(input.image.pixels, other.image.pixels).map { min(1, max(0, $0 + $1 - 0.5)) })
             input.depth = nil
             input.timestamp = Double(f) / 60
             let output = engine.process(input)
@@ -113,8 +115,9 @@ final class MotionSelectionTests: XCTestCase {
             let a = 0.0007 * sin(Double(f) * 1.3)
             let rotation = M3([cos(a), -sin(a), 0, sin(a), cos(a), 0, 0, 0, 1])
             let pose = RigidTransform(rotation: rotation, translation: V3(0.0001 * sin(Double(f) * 1.7), 0, 0))
-            let centre = locator.add(image: input.image, prev: previous, cur: pyramid, pose: pose,
-                                     dt: dt, time: time, radius: 126, klt: KLTTracker(), corners: CornerDetector())
+            let centre = locator.add(
+                image: input.image, prev: previous, cur: pyramid, pose: pose,
+                dt: dt, time: time, radius: 126, klt: KLTTracker(), corners: CornerDetector())
             if centre != nil {
                 if f < 90 { acquiredBeforeGap = true } else { acquiredAfterGap = true }
             }
@@ -138,9 +141,10 @@ final class MotionSelectionTests: XCTestCase {
         locator.detectEvery = 1
         var firstIDs = Set<Int>()
         for f in 0..<180 {
-            let centre = locator.add(image: image, prev: f == 0 ? nil : pyramid, cur: pyramid, pose: .identity,
-                                     dt: 1.0 / 60, time: Double(f) / 60, radius: 100,
-                                     klt: KLTTracker(), corners: CornerDetector())
+            let centre = locator.add(
+                image: image, prev: f == 0 ? nil : pyramid, cur: pyramid, pose: .identity,
+                dt: 1.0 / 60, time: Double(f) / 60, radius: 100,
+                klt: KLTTracker(), corners: CornerDetector())
             XCTAssertNil(centre)
             XCTAssertLessThanOrEqual(locator.points.count, locator.maxPoints)
             if f == 30 { firstIDs = Set(locator.points.map { $0.id }) }

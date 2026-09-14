@@ -24,8 +24,10 @@ final class HarmonicOverlayNode: SCNNode {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     /// Render thread. The display transform maps top-left-origin image coordinates to view coordinates.
-    func update(image: CGImage?, displayTransform: CGAffineTransform, viewportSize: CGSize,
-                renderer: SCNSceneRenderer) {
+    func update(
+        image: CGImage?, displayTransform: CGAffineTransform, viewportSize: CGSize,
+        renderer: SCNSceneRenderer
+    ) {
         guard let image, renderer.pointOfView != nil, viewportSize.width > 0, viewportSize.height > 0 else {
             isHidden = true
             self.image = nil
@@ -38,14 +40,19 @@ final class HarmonicOverlayNode: SCNNode {
             material.diffuse.contents = image
         }
         let vertices = corners.map { p in
-            renderer.unprojectPoint(SCNVector3(Float(p.x * viewportSize.width),
-                                              Float(p.y * viewportSize.height), 0.01))
+            renderer.unprojectPoint(
+                SCNVector3(
+                    Float(p.x * viewportSize.width),
+                    Float(p.y * viewportSize.height), 0.01))
         }
         // SceneKit's image texture coordinates, like UIKit's view coordinates, start at the top left.
         let inverse = displayTransform.inverted()
         let uv = corners.map { $0.applying(inverse) }
-        geometry = SCNGeometry(sources: [SCNGeometrySource(vertices: vertices),
-                                        SCNGeometrySource(textureCoordinates: uv)], elements: [triangles])
+        geometry = SCNGeometry(
+            sources: [
+                SCNGeometrySource(vertices: vertices),
+                SCNGeometrySource(textureCoordinates: uv),
+            ], elements: [triangles])
         geometry?.materials = [material]
     }
 }
@@ -54,10 +61,13 @@ extension CGImage {
     /// Premultiplied RGBA8 bytes → image (the bytes are copied).
     static func rgba8(width: Int, height: Int, bytes: [UInt8]) -> CGImage? {
         guard bytes.count == 4 * width * height,
-              let provider = CGDataProvider(data: Data(bytes) as CFData) else { return nil }
-        return CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: 4 * width,
-                       space: CGColorSpaceCreateDeviceRGB(),
-                       bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue),
-                       provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
+            let provider = CGDataProvider(data: Data(bytes) as CFData)
+        else { return nil }
+        return CGImage(
+            width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: 4 * width,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGBitmapInfo(
+                rawValue: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue),
+            provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
     }
 }

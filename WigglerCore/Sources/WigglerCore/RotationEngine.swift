@@ -5,7 +5,12 @@ import Foundation
 public struct CameraIntrinsics {
     /// Focal lengths and principal point in the pixel units of the image handed to the engine.
     public var fx: Double, fy: Double, cx: Double, cy: Double
-    public init(fx: Double, fy: Double, cx: Double, cy: Double) { self.fx = fx; self.fy = fy; self.cx = cx; self.cy = cy }
+    public init(fx: Double, fy: Double, cx: Double, cy: Double) {
+        self.fx = fx
+        self.fy = fy
+        self.cx = cx
+        self.cy = cy
+    }
     /// Rescale intrinsics given for a `fromWidth` x `fromHeight` image to a `toWidth` x `toHeight` one (same field of view).
     public func scaled(fromWidth: Double, fromHeight: Double, toWidth: Double, toHeight: Double) -> CameraIntrinsics {
         let sx = toWidth / fromWidth, sy = toHeight / fromHeight
@@ -21,7 +26,10 @@ public struct DepthMap {
     /// Optional per-pixel confidence (ARKit: 0 low, 1 medium, 2 high).
     public var confidence: [UInt8]?
     public init(width: Int, height: Int, depth: [Float], confidence: [UInt8]?) {
-        self.width = width; self.height = height; self.depth = depth; self.confidence = confidence
+        self.width = width
+        self.height = height
+        self.depth = depth
+        self.confidence = confidence
     }
 
     /// Robust depth at normalised image coordinates (u, v ∈ [0,1]): median of the confident 3x3 neighbourhood,
@@ -60,20 +68,26 @@ public struct FrameInput {
     public var poseValid: Bool
     public var depth: DepthMap?
     public var timestamp: Double
-    public init(image: GrayImage, intrinsics: CameraIntrinsics, cameraToWorld: RigidTransform, poseValid: Bool,
-                depth: DepthMap?, timestamp: Double) {
-        self.image = image; self.intrinsics = intrinsics; self.cameraToWorld = cameraToWorld
-        self.poseValid = poseValid; self.depth = depth; self.timestamp = timestamp
+    public init(
+        image: GrayImage, intrinsics: CameraIntrinsics, cameraToWorld: RigidTransform, poseValid: Bool,
+        depth: DepthMap?, timestamp: Double
+    ) {
+        self.image = image
+        self.intrinsics = intrinsics
+        self.cameraToWorld = cameraToWorld
+        self.poseValid = poseValid
+        self.depth = depth
+        self.timestamp = timestamp
     }
 }
 
 // MARK: - Outputs
 
 public enum EngineState: String {
-    case idle          // no marker placed
-    case calibrating   // gathering a full turn to find the axis
-    case locked        // axis known, angle tracked
-    case lost          // axis known but the angle cannot currently be measured
+    case idle  // no marker placed
+    case calibrating  // gathering a full turn to find the axis
+    case locked  // axis known, angle tracked
+    case lost  // axis known but the angle cannot currently be measured
 }
 
 public enum TrackStatus { case young, good, inconsistent, noDepth }
@@ -139,7 +153,7 @@ public struct EngineConfig {
     public var axisUpdateInterval = 10
     public var constraintWindowFrames = 900
     public var sampleHistory = 90
-    public var lockedDriftFrames = 3      // consecutive inconsistent axis estimates before adopting the new axis
+    public var lockedDriftFrames = 3  // consecutive inconsistent axis estimates before adopting the new axis
     public var axisConstraintCapacity = 24000
     /// Median circular-trajectory error above which fresh points invalidate the axis (meters).
     public var axisMotionToleranceMeters = 0.01
@@ -237,7 +251,8 @@ public final class RotationEngine {
         lastEstimate = nil
         inconsistentAxisCount = 0
         calibrationStartFrame = frameIndex
-        thetaMin = 0; thetaMax = 0
+        thetaMin = 0
+        thetaMax = 0
         lastAngleOkFrame = -1000
         lastRelocFrame = -1000
         fusion.reset()
@@ -276,9 +291,10 @@ public final class RotationEngine {
         let retainedIDs = tracks.ids
         locator.maxPoints = max(120, config.targetTrackCount + 80)
         locator.maxResidual = config.maxResidual
-        let hit = locator.add(image: input.image, prev: prevPyramid, cur: pyramid,
-                              pose: input.poseValid ? input.cameraToWorld : nil, dt: frameDT, time: input.timestamp,
-                              radius: roiRadius, klt: klt, corners: corners, retaining: retainedIDs)
+        let hit = locator.add(
+            image: input.image, prev: prevPyramid, cur: pyramid,
+            pose: input.poseValid ? input.cameraToWorld : nil, dt: frameDT, time: input.timestamp,
+            radius: roiRadius, klt: klt, corners: corners, retaining: retainedIDs)
         if let hit {
             if let m = marker {
                 let nearbyMoving = locator.points.filter {
@@ -310,17 +326,22 @@ public final class RotationEngine {
 
         // 2. Depth → 3D samples in world coordinates.
         if locator.motionValid {
-            tracks.sampleDepth(input, pose: pose, frame: frameIndex, minConfidence: config.minDepthConfidence,
-                               maxJumpFraction: config.maxDepthJumpFraction, historyLength: config.sampleHistory)
+            tracks.sampleDepth(
+                input, pose: pose, frame: frameIndex, minConfidence: config.minDepthConfidence,
+                maxJumpFraction: config.maxDepthJumpFraction, historyLength: config.sampleHistory)
         }
 
         // 3. Chord constraints for the axis.
         let objectRadius = currentObjectRadius()
         let dmin = axis == nil ? config.chordMinMeters : min(0.05, max(0.01, 0.1 * objectRadius))
-        let chords = tracks.chordConstraints(frame: frameIndex, minLength: dmin,
-                                             maxFrames: config.chordMaxFrames, stride: config.chordStride)
-        if let ax = axis, stability.observe(chords: chords, axis: ax, tolerance: config.axisMotionToleranceMeters,
-                                          required: config.lockedDriftFrames) {
+        let chords = tracks.chordConstraints(
+            frame: frameIndex, minLength: dmin,
+            maxFrames: config.chordMaxFrames, stride: config.chordStride)
+        if let ax = axis,
+            stability.observe(
+                chords: chords, axis: ax, tolerance: config.axisMotionToleranceMeters,
+                required: config.lockedDriftFrames)
+        {
             restartCalibration()
             tracks.update(selected)
         } else {
@@ -337,7 +358,8 @@ public final class RotationEngine {
             lastDispersion = up.dispersion
             if up.ok {
                 lastAngleOkFrame = frameIndex
-                thetaMin = min(thetaMin, up.theta); thetaMax = max(thetaMax, up.theta)
+                thetaMin = min(thetaMin, up.theta)
+                thetaMax = max(thetaMax, up.theta)
                 let rpmInst = up.delta / dt * 60 / (2 * .pi)
                 rpmFiltered += 0.15 * (rpmInst - rpmFiltered)
             } else {
@@ -368,11 +390,13 @@ public final class RotationEngine {
         //    would make every candidate agree with the current angle, silently throwing away one frame of motion
         //    every `axisUpdateInterval` frames (a systematic ~7 % under-estimation of the rotation).
         if frameIndex % max(1, config.axisUpdateInterval) == 0,
-           stability.hasNewEvidence(frame: estimator.newestFrame) {
+            stability.hasNewEvidence(frame: estimator.newestFrame)
+        {
             let evidenceFrame = estimator.newestFrame
             if let est = estimator.estimate(), est.isWellConditioned {
                 lastEstimate = est
-                let consistent = axis.map { AxisStability.agrees(est.axis, with: $0, objectRadius: objectRadius) } ?? false
+                let consistent =
+                    axis.map { AxisStability.agrees(est.axis, with: $0, objectRadius: objectRadius) } ?? false
                 updateAxis(with: est, objectRadius: objectRadius)
                 stability.observe(frame: evidenceFrame, consistent: consistent)
             } else {
@@ -407,8 +431,9 @@ public final class RotationEngine {
             } else {
                 lostSince = nil
             }
-            relocalise(image: input.image, marker: marker, angleOk: angleOk,
-                       healthy: geometryHealthy, omega: angle.lastDelta / dt, dt: dt)
+            relocalise(
+                image: input.image, marker: marker, angleOk: angleOk,
+                healthy: geometryHealthy, omega: angle.lastDelta / dt, dt: dt)
         case .idle:
             break
         }
@@ -428,7 +453,9 @@ public final class RotationEngine {
         out.relocalizerFill = reloc.fillRatio
         out.periodDegrees = reloc.analysed ? reloc.period * 180 / .pi : 360
         if let est = lastEstimate {
-            let q = min(1, est.inlierRatio / 0.7) * min(1, est.coverage / 0.6) * min(1, (0.3 - min(est.planarity, 0.3)) / 0.25)
+            let q =
+                min(1, est.inlierRatio / 0.7) * min(1, est.coverage / 0.6)
+                * min(1, (0.3 - min(est.planarity, 0.3)) / 0.25)
             out.axisQuality = max(0, min(1, q))
         }
         let (radii, heights) = tracks.extent { angle.isConsistent(id: $0) }
@@ -528,9 +555,12 @@ public final class RotationEngine {
 
     /// Fuse the appearance measurement into the integrated angle. Returns nothing: everything it does is either
     /// a bounded correction of `angle`, or bookkeeping on the library.
-    private func relocalise(image: GrayImage, marker: Marker,
-                            angleOk: Bool, healthy: Bool, omega: Double, dt: Double) {
-        let patch = image.patch(centerX: marker.x, centerY: marker.y, halfSize: marker.radius, side: config.descriptorSide)
+    private func relocalise(
+        image: GrayImage, marker: Marker,
+        angleOk: Bool, healthy: Bool, omega: Double, dt: Double
+    ) {
+        let patch = image.patch(
+            centerX: marker.x, centerY: marker.y, halfSize: marker.radius, side: config.descriptorSide)
         // Fill the library while the geometry is clean. A partially filled library is already useful.
         if angleOk && lastDispersion < 6 * Double.pi / 180 && lastInlierCount >= 8 && !reloc.isComplete {
             reloc.record(patch: patch, theta: angle.theta)
@@ -538,8 +568,9 @@ public final class RotationEngine {
         guard reloc.isUsable else { return }
 
         let candidates = reloc.candidates(patch: patch, nearTheta: angle.theta)
-        let (correction, outcome) = fusion.update(theta: angle.theta, omega: omega, healthy: healthy,
-                                                  candidates: candidates, dt: dt)
+        let (correction, outcome) = fusion.update(
+            theta: angle.theta, omega: omega, healthy: healthy,
+            candidates: candidates, dt: dt)
         if correction != 0 { angle.shift(by: correction) }
         if outcome == .updated { lastRelocFrame = frameIndex }
         // Keep the library in step with the current appearance, but only on a match we actually believe.
@@ -563,9 +594,13 @@ public final class RotationEngine {
             if axis == nil { return "Finding the axis… (\(out.constraintCount) chords)" }
             return String(format: "Provisional axis — full turn: %.0f°/360°", min(out.turnCoverageDegrees, 360))
         case .locked:
-            if !reloc.isComplete { return String(format: "Axis locked — learning appearance %.0f %%", reloc.fillRatio * 100) }
+            if !reloc.isComplete {
+                return String(format: "Axis locked — learning appearance %.0f %%", reloc.fillRatio * 100)
+            }
             if reloc.isRotationallySymmetric { return "Rotationally symmetric object: relative angle only" }
-            if reloc.period < 2 * .pi - 1e-6 { return String(format: "Tracking — appearance period %.0f°", reloc.period * 180 / .pi) }
+            if reloc.period < 2 * .pi - 1e-6 {
+                return String(format: "Tracking — appearance period %.0f°", reloc.period * 180 / .pi)
+            }
             return "Tracking"
         case .lost: return "Tracking lost — clear the view or rotate the object"
         }

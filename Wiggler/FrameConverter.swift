@@ -20,9 +20,12 @@ final class FrameConverter {
         guard let image = luma(from: frame.capturedImage) else { return nil }
         let res = frame.camera.imageResolution
         let k = frame.camera.intrinsics
-        let intrinsics = CameraIntrinsics(fx: Double(k[0][0]), fy: Double(k[1][1]), cx: Double(k[2][0]), cy: Double(k[2][1]))
-            .scaled(fromWidth: Double(res.width), fromHeight: Double(res.height),
-                    toWidth: Double(Self.engineWidth), toHeight: Double(Self.engineHeight))
+        let intrinsics = CameraIntrinsics(
+            fx: Double(k[0][0]), fy: Double(k[1][1]), cx: Double(k[2][0]), cy: Double(k[2][1])
+        )
+        .scaled(
+            fromWidth: Double(res.width), fromHeight: Double(res.height),
+            toWidth: Double(Self.engineWidth), toHeight: Double(Self.engineHeight))
         let m = frame.camera.transform
         let pose = RigidTransform(columnMajor4x4: [
             Double(m.columns.0.x), Double(m.columns.0.y), Double(m.columns.0.z), Double(m.columns.0.w),
@@ -43,15 +46,19 @@ final class FrameConverter {
         case .notAvailable: poseValid = false
         }
         let depth = frame.sceneDepth.flatMap { depthMap(from: $0) }
-        return FrameInput(image: image, intrinsics: intrinsics, cameraToWorld: pose, poseValid: poseValid,
-                          depth: depth, timestamp: frame.timestamp)
+        return FrameInput(
+            image: image, intrinsics: intrinsics, cameraToWorld: pose, poseValid: poseValid,
+            depth: depth, timestamp: frame.timestamp)
     }
 
     /// Downscale the luma plane with vImage and convert to a float image.
     private func luma(from pixelBuffer: CVPixelBuffer) -> GrayImage? {
         let format = CVPixelBufferGetPixelFormatType(pixelBuffer)
-        guard format == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange || format == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
-              CVPixelBufferGetPlaneCount(pixelBuffer) >= 1 else { return nil }
+        guard
+            format == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
+                || format == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
+            CVPixelBufferGetPlaneCount(pixelBuffer) >= 1
+        else { return nil }
         CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
         guard let base = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, 0) else { return nil }
@@ -61,8 +68,9 @@ final class FrameConverter {
         var src = vImage_Buffer(data: base, height: vImagePixelCount(h), width: vImagePixelCount(w), rowBytes: stride)
         var result: GrayImage?
         scaled.withUnsafeMutableBytes { dstBytes in
-            var dst = vImage_Buffer(data: dstBytes.baseAddress, height: vImagePixelCount(Self.engineHeight),
-                                    width: vImagePixelCount(Self.engineWidth), rowBytes: Self.engineWidth)
+            var dst = vImage_Buffer(
+                data: dstBytes.baseAddress, height: vImagePixelCount(Self.engineHeight),
+                width: vImagePixelCount(Self.engineWidth), rowBytes: Self.engineWidth)
             let needed = vImageScale_Planar8(&src, &dst, nil, vImage_Flags(kvImageGetTempBufferSize))
             if needed > tempBufferSize {
                 tempBuffer?.deallocate()
@@ -71,7 +79,8 @@ final class FrameConverter {
             }
             let err = vImageScale_Planar8(&src, &dst, tempBuffer, vImage_Flags(kvImageNoFlags))
             if err == kvImageNoError, let p = dstBytes.baseAddress?.assumingMemoryBound(to: UInt8.self) {
-                result = GrayImage(width: Self.engineWidth, height: Self.engineHeight, luma8: p, bytesPerRow: Self.engineWidth)
+                result = GrayImage(
+                    width: Self.engineWidth, height: Self.engineHeight, luma8: p, bytesPerRow: Self.engineWidth)
             }
         }
         if result != nil { lastLuma8 = scaled }
@@ -95,7 +104,9 @@ final class FrameConverter {
         if let cbuf = depth.confidenceMap {
             CVPixelBufferLockBaseAddress(cbuf, .readOnly)
             defer { CVPixelBufferUnlockBaseAddress(cbuf, .readOnly) }
-            if CVPixelBufferGetWidth(cbuf) == w, CVPixelBufferGetHeight(cbuf) == h, let cbase = CVPixelBufferGetBaseAddress(cbuf) {
+            if CVPixelBufferGetWidth(cbuf) == w, CVPixelBufferGetHeight(cbuf) == h,
+                let cbase = CVPixelBufferGetBaseAddress(cbuf)
+            {
                 let cstride = CVPixelBufferGetBytesPerRow(cbuf)
                 var c = [UInt8](repeating: 0, count: w * h)
                 for y in 0..<h {

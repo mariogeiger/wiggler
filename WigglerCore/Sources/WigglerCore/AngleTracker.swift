@@ -6,7 +6,11 @@ public struct AngleObservation {
     public var phi: Double
     /// Distance of the point to the axis (meters) — sets the reliability of `phi`.
     public var radius: Double
-    public init(id: Int, phi: Double, radius: Double) { self.id = id; self.phi = phi; self.radius = radius }
+    public init(id: Int, phi: Double, radius: Double) {
+        self.id = id
+        self.phi = phi
+        self.radius = radius
+    }
 }
 
 public struct AngleUpdate {
@@ -24,15 +28,19 @@ public struct AngleUpdate {
 /// first appears and θ is the robust weighted mean of φ_i − o_i. Because every live track "remembers" θ from its
 /// birth, drift only accumulates through track turnover, not per frame.
 public struct AngleTracker {
-    private struct State { var offset: Double; var badCount: Int; var age: Int }
+    private struct State {
+        var offset: Double
+        var badCount: Int
+        var age: Int
+    }
     private var states: [Int: State] = [:]
 
     /// Continuous (unwrapped) angle in radians.
     private(set) public var theta: Double = 0
     private(set) public var lastDelta: Double = 0
 
-    public var sigma: Double = 5 * .pi / 180     // Cauchy scale for the robust mean
-    public var gate: Double = 15 * .pi / 180     // beyond this a track is counted as inconsistent
+    public var sigma: Double = 5 * .pi / 180  // Cauchy scale for the robust mean
+    public var gate: Double = 15 * .pi / 180  // beyond this a track is counted as inconsistent
     public var maxBadFrames: Int = 3
     public var minInliers: Int = 4
 
@@ -67,7 +75,8 @@ public struct AngleTracker {
                 for c in cand {
                     let dev = wrapAngle(c.value - pred)
                     let w = c.w / (1 + (dev / sigma) * (dev / sigma))
-                    num += w * dev; den += w
+                    num += w * dev
+                    den += w
                 }
                 if den > 0 { pred += num / den }
             }
@@ -76,7 +85,10 @@ public struct AngleTracker {
             for c in cand {
                 let dev = wrapAngle(c.value - pred)
                 if abs(dev) < gate {
-                    num += c.w * dev; den += c.w; sq += c.w * dev * dev; inliers += 1
+                    num += c.w * dev
+                    den += c.w
+                    sq += c.w * dev * dev
+                    inliers += 1
                 }
             }
             if den > 0 && inliers >= minInliers {
@@ -109,8 +121,9 @@ public struct AngleTracker {
         for o in observations where states[o.id] == nil {
             states[o.id] = State(offset: wrapAngle(o.phi - theta), badCount: 0, age: 0)
         }
-        return AngleUpdate(theta: theta, delta: lastDelta, inlierCount: inliers, candidateCount: cand.count,
-                           dispersion: dispersion, ok: ok)
+        return AngleUpdate(
+            theta: theta, delta: lastDelta, inlierCount: inliers, candidateCount: cand.count,
+            dispersion: dispersion, ok: ok)
     }
 
     /// The axis moved: re-anchor every track so θ stays continuous.
