@@ -43,18 +43,19 @@ struct ContentView: View {
             Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 8) {
                 GridRow {
                     harmonicControl.fixedSize()
-                    Spacer(minLength: 0).gridCellUnsizedAxes(.vertical)
-                    HStack(spacing: 0) {
-                        pointCountControl
-                        recordButton
-                    }
-                    .fixedSize()
-                    .gridColumnAlignment(.trailing)
+                    recordButton
+                        .fixedSize()
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .gridColumnAlignment(.trailing)
                 }
                 GridRow {
                     harmonicSignalControl.fixedSize()
-                    Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])
-                    measurementLine.gridCellUnsizedAxes(.horizontal)
+                    measurementLine
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .gridCellUnsizedAxes(.horizontal)
+                }
+                GridRow {
+                    pointCountControl.fixedSize()
                 }
             }
         }
