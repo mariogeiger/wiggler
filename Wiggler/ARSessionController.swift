@@ -63,7 +63,7 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
                                         orders: ARSessionController.harmonicOrders)
     private var harmonicOrderEngine: Int?
     /// The harmonic overlay is on screen (engine queue; mirrored under `lock` for the render thread, which then
-    /// withdraws the axis and ray so the colours are not drawn over).
+    /// withdraws the ray while keeping the axis visible).
     private var harmonicShown = false
     private var harmonicShownForRender = false
     private var lastHarmonicRender = Date.distantPast
@@ -247,8 +247,8 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
     func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
         lock.lock()
         let out = latestOutput
-        let hidden = harmonicShownForRender
+        let hideRay = harmonicShownForRender
         lock.unlock()
-        overlay.update(with: out, hidden: hidden)
+        overlay.update(with: out, hideRay: hideRay)
     }
 }

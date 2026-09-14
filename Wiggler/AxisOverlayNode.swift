@@ -14,8 +14,8 @@ final class AxisOverlayNode: SCNNode {
     override init() {
         super.init()
         let lineMat = SCNMaterial()
-        lineMat.diffuse.contents = UIColor.cyan
-        lineMat.emission.contents = UIColor.cyan
+        lineMat.diffuse.contents = UIColor.red
+        lineMat.emission.contents = UIColor.red
         lineMat.lightingModel = .constant
         axisLine.geometry = SCNCylinder(radius: 0.002, height: CGFloat(span))
         axisLine.geometry?.materials = [lineMat]
@@ -38,9 +38,9 @@ final class AxisOverlayNode: SCNNode {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    /// Called on the SceneKit render thread. `hidden` withdraws the whole node (another overlay has the screen).
-    func update(with out: EngineOutput, hidden: Bool) {
-        guard !hidden, let axis = out.axis, out.state != .idle else {
+    /// Called on the SceneKit render thread. The axis remains visible while the ray can be hidden independently.
+    func update(with out: EngineOutput, hideRay: Bool) {
+        guard let axis = out.axis, out.state != .idle else {
             isHidden = true
             return
         }
@@ -60,10 +60,12 @@ final class AxisOverlayNode: SCNNode {
             ray.scale = SCNVector3(Float(radius), span, 1)
             ray.position = SCNVector3(Float(0.5 * radius), 0, 0)
         }
-        let visible = out.state == .locked && out.angleConfidence > 0.15
+        let visible = !hideRay && out.state == .locked && out.angleConfidence > 0.15
         rayPivot.isHidden = !visible
         rayPivot.eulerAngles = SCNVector3(0, Float(out.theta), 0)
         ray.geometry?.firstMaterial?.diffuse.contents = UIColor.orange.withAlphaComponent(CGFloat(0.35 + 0.6 * out.angleConfidence))
-        axisLine.geometry?.firstMaterial?.diffuse.contents = UIColor.cyan.withAlphaComponent(CGFloat(0.4 + 0.6 * out.axisQuality))
+        let axisColor = out.state == .locked ? UIColor.green : UIColor.red
+        axisLine.geometry?.firstMaterial?.diffuse.contents = axisColor
+        axisLine.geometry?.firstMaterial?.emission.contents = axisColor
     }
 }

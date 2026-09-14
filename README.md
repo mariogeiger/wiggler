@@ -42,8 +42,9 @@ an occlusion or a stale library to test those two key behaviors.
    stationary are replaced by moving points. When everything stops, existing tracks are preserved.
    If another region becomes active while the first stops, calibration restarts on the new region.
 3. Rotate the object. In the calibrating state, the app collects 3D chords until it finds a well-conditioned
-   axis, then waits for a full turn (0→360° counter). In the locked state, the axis is displayed as a cyan line,
-   a translucent cylinder, and a ring at the base; the orange ray rotates with the object.
+   axis, then waits for a full turn. The axis is red while calibrating or tracking is lost, and green once
+   locked. The orange ray rotates with the object when its angle is reliable. The axis remains displayed
+   with the harmonic overlay; only the ray is hidden in that mode.
 4. During the first turn after locking, the app learns the object's appearance every 10° (appearance gauge).
    It then continuously aligns the absolute angle with this library and detects the appearance period:
    360° for an arbitrary object, 180°, 120°… or rotational symmetry. For a body of revolution, only the relative

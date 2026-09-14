@@ -34,8 +34,6 @@ struct ContentView: View {
                     HStack(alignment: .top) {
                         rpmText
                         Spacer()
-                        statusText
-                        Spacer()
                         angleText
                     }
                     .padding(.horizontal, 16)
@@ -99,15 +97,6 @@ struct ContentView: View {
         return Text(o.state == .locked ? String(format: "%+.0f rpm", o.rpm) : "")
             .font(.caption.monospacedDigit())
             .foregroundStyle(.white.opacity(0.8))
-    }
-
-    /// What the engine is doing while it is not measuring.
-    private var statusText: some View {
-        let o = controller.output
-        return Text(o.state == .locked ? "" : o.message)
-            .font(.caption2)
-            .foregroundStyle(.white.opacity(0.7))
-            .multilineTextAlignment(.center)
     }
 
     private var angleText: some View {
