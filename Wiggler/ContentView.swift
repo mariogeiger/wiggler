@@ -41,8 +41,12 @@ struct ContentView: View {
                     }
                     .padding(.horizontal, 20)
                     HStack {
-                        harmonicSignalControl
                         harmonicControl
+                        Spacer()
+                    }
+                    .padding(.horizontal, 20)
+                    HStack {
+                        harmonicSignalControl
                         Spacer()
                     }
                     .padding(.horizontal, 20)
@@ -115,30 +119,19 @@ struct ContentView: View {
     }
 
     private var harmonicSignalControl: some View {
-        Menu {
+        HStack(spacing: 2) {
             ForEach(HarmonicSignal.allCases, id: \.self) { signal in
-                Button {
+                let available = signal != .depth || ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth)
+                selectionButton(signal.shortLabel, selected: controller.harmonicSignal == signal) {
                     controller.setHarmonicSignal(signal)
-                } label: {
-                    if controller.harmonicSignal == signal {
-                        Label(signal.label, systemImage: "checkmark")
-                    } else {
-                        Text(signal.label)
-                    }
                 }
-                .disabled(signal == .depth && !ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth))
+                .disabled(!available)
+                .opacity(available ? 1 : 0.4)
+                .accessibilityLabel(signal.label)
             }
-        } label: {
-            HStack(spacing: 4) {
-                Text(controller.harmonicSignal.shortLabel)
-                Image(systemName: "chevron.down").font(.system(size: 8))
-            }
-            .font(.caption2.monospaced())
-            .foregroundStyle(.white.opacity(0.8))
-            .padding(.horizontal, 10).padding(.vertical, 9)
-            .background(.black.opacity(0.35), in: Capsule())
         }
-        .accessibilityLabel("Harmonic input: \(controller.harmonicSignal.label)")
+        .padding(3)
+        .background(.black.opacity(0.35), in: Capsule())
     }
 
     /// Which harmonic of the current image is drawn (see `HarmonicMap`).
@@ -159,10 +152,13 @@ struct ContentView: View {
     }
 
     private func harmonicButton(_ l: Int?, _ label: String) -> some View {
-        let selected = controller.harmonicOrder == l
-        return Button {
+        selectionButton(label, selected: controller.harmonicOrder == l) {
             controller.setHarmonicOrder(l)
-        } label: {
+        }
+    }
+
+    private func selectionButton(_ label: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
             Text(label)
                 .font(.caption2.monospaced())
                 .foregroundStyle(selected ? .black : .white.opacity(0.8))
@@ -171,6 +167,7 @@ struct ContentView: View {
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     private var recordButton: some View {

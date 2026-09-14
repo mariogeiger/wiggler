@@ -82,9 +82,10 @@ pre-commit run --all-files
 Point colors: green = tracking consistent with rotation, red = inconsistent (hands, background),
 yellow = no depth, white = new.
 
-The harmonic input menu selects **Y** (luma / brightness, the default), **Cr** (red chroma, red relative to
-luminance), **Cb** (blue chroma, blue relative to luminance), or **Depth** (LiDAR depth in meters).
-The selection is saved. Tracking always uses luma. Choose **off**, **l=1**, **l=2**, or **l=3** beside it to
+The harmonic input buttons, below the harmonic-order row, select **Y** (luma / brightness, the default),
+**Cr** (red chroma, red relative to luminance), **Cb** (blue chroma, blue relative to luminance),
+or **Depth** (LiDAR depth in meters).
+The selection is saved. Tracking always uses luma. Choose **off**, **l=1**, **l=2**, or **l=3** in the row above to
 hide the map or display a harmonic. Switching input clears the map and requires a new full turn.
 The overlay shows the signed reconstruction `a cos(lθ) + b sin(lθ)`: red is positive, blue is negative,
 and opacity is its absolute value, reaching full opacity at 20/255 for color or 2 cm for depth.
