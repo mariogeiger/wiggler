@@ -48,7 +48,7 @@ final class FrameConverter {
     }
 
     /// Downscale the luma plane with vImage and convert to a float image.
-    private func luma(from pixelBuffer: CVPixelBuffer) -> GrayImage? {
+    func luma(from pixelBuffer: CVPixelBuffer) -> GrayImage? {
         let format = CVPixelBufferGetPixelFormatType(pixelBuffer)
         guard format == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange || format == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
               CVPixelBufferGetPlaneCount(pixelBuffer) >= 1 else { return nil }

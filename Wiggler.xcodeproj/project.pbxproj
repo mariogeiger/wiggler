@@ -13,6 +13,7 @@
 		A100000000000000000000A4 /* AxisOverlayNode.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000F4 /* AxisOverlayNode.swift */; };
 		A100000000000000000000A5 /* FrameConverter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000F5 /* FrameConverter.swift */; };
 		A100000000000000000000A7 /* SessionRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000F6 /* SessionRecorder.swift */; };
+		A100000000000000000000A8 /* AVCaptureSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000F8 /* AVCaptureSource.swift */; };
 		A100000000000000000000A6 /* WigglerCore in Frameworks */ = {isa = PBXBuildFile; productRef = A100000000000000000000D1 /* WigglerCore */; };
 /* End PBXBuildFile section */
 
@@ -25,6 +26,7 @@
 		A100000000000000000000F5 /* FrameConverter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameConverter.swift; sourceTree = "<group>"; };
 		A100000000000000000000F6 /* SessionRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionRecorder.swift; sourceTree = "<group>"; };
 		A100000000000000000000F7 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A100000000000000000000F8 /* AVCaptureSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AVCaptureSource.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -58,6 +60,7 @@
 				A100000000000000000000F5 /* FrameConverter.swift */,
 				A100000000000000000000F6 /* SessionRecorder.swift */,
 				A100000000000000000000F7 /* Info.plist */,
+				A100000000000000000000F8 /* AVCaptureSource.swift */,
 			);
 			path = Wiggler;
 			sourceTree = "<group>";
@@ -157,6 +160,7 @@
 				A100000000000000000000A4 /* AxisOverlayNode.swift in Sources */,
 				A100000000000000000000A5 /* FrameConverter.swift in Sources */,
 				A100000000000000000000A7 /* SessionRecorder.swift in Sources */,
+				A100000000000000000000A8 /* AVCaptureSource.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
