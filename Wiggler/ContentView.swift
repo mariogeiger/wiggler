@@ -45,6 +45,7 @@ struct PreviewContainer: UIViewRepresentable {
 
 struct ContentView: View {
     @StateObject private var controller = ARSessionController()
+    @StateObject private var power = PowerMonitor()
 
     var body: some View {
         GeometryReader { geo in
@@ -73,7 +74,10 @@ struct ContentView: View {
 
                 VStack {
                     HStack(alignment: .top) {
-                        rpmText
+                        VStack(alignment: .leading, spacing: 2) {
+                            rpmText
+                            powerText
+                        }
                         Spacer()
                         angleText
                     }
@@ -82,6 +86,8 @@ struct ContentView: View {
                     Spacer()
                     HStack {
                         arkitSwitch
+                        Spacer()
+                        pointCountControl
                         Spacer()
                         recordButton
                     }
@@ -93,8 +99,8 @@ struct ContentView: View {
             .onChange(of: geo.size) { _, s in controller.updateViewportSize(s) }
         }
         .ignoresSafeArea()
-        .onAppear { controller.start() }
-        .onDisappear { controller.pause() }
+        .onAppear { controller.start(); power.start() }
+        .onDisappear { controller.pause(); power.stop() }
     }
 
     // MARK: Overlays
@@ -183,6 +189,28 @@ struct ContentView: View {
         return Text(o.state == .locked && o.angleConfidence > 0 ? String(format: "%.0f°", o.angleDegrees) : "")
             .font(.caption.monospacedDigit())
             .foregroundStyle(.white.opacity(0.8))
+    }
+
+    private var powerText: some View {
+        Text(power.watts.map { String(format: "%.1f W%@", $0, power.isEstimate ? " ~" : "") } ?? "— W")
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(.white.opacity(0.6))
+    }
+
+    private var pointCountControl: some View {
+        HStack(spacing: 10) {
+            Button { controller.adjustTrackCount(by: -20) } label: {
+                Image(systemName: "minus").frame(width: 28, height: 28)
+            }
+            Text("\(controller.targetTrackCount) pts").font(.caption.monospacedDigit()).foregroundStyle(.white.opacity(0.8))
+            Button { controller.adjustTrackCount(by: 20) } label: {
+                Image(systemName: "plus").frame(width: 28, height: 28)
+            }
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.white.opacity(0.8))
+        .padding(.horizontal, 6)
+        .background(.black.opacity(0.35), in: Capsule())
     }
 
     private var arkitSwitch: some View {

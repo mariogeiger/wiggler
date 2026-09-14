@@ -29,6 +29,14 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
 
     /// Region-of-interest radius (feature search area around the marker) as a fraction of the engine image height.
     var roiFraction: Double = 0.35
+    /// Number of tracked points the engine aims for (adjustable from the UI).
+    @Published private(set) var targetTrackCount = 160
+
+    func adjustTrackCount(by delta: Int) {
+        targetTrackCount = max(20, min(400, targetTrackCount + delta))
+        let n = targetTrackCount
+        engineQueue.async { [engine] in engine.config.targetTrackCount = n }
+    }
 
     // MARK: Views backing
 
