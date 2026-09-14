@@ -152,10 +152,8 @@ public struct EngineConfig {
     public var lostAfterFrames = 45
     /// Radius of the region of interest around the marker, as a fraction of the image height.
     public var roiRadiusFraction = 0.35
-    /// Place the marker on the moving textured region by itself (see `MotionLocator`), and look for it again
-    /// after the angle has been lost for `autoMarkerLostSeconds`.
-    public var autoMarker = true
-    public var autoMarkerLostSeconds = 5.0
+    /// Search for another moving region after the angle has been lost for this long.
+    public var reacquisitionDelaySeconds = 5.0
     public init() {}
 }
 
@@ -182,7 +180,6 @@ public final class RotationEngine {
     }
 
     private var tracks: [Track] = []
-    private var nextId = 1
     private var prevPyramid: Pyramid?
     private var frameIndex = 0
     private var klt = KLTTracker()
@@ -200,7 +197,6 @@ public final class RotationEngine {
     private var inconsistentAxisCount = 0
     private var calibrationStartFrame = 0
     private var thetaMin = 0.0, thetaMax = 0.0
-    private var thetaHistory: [Double?] = []
     private var lastAngleOkFrame = -1000
     private var lastRelocFrame = -1000
     private var fusion = AngleFusion()
@@ -225,20 +221,19 @@ public final class RotationEngine {
 
     // MARK: Marker
 
-    /// Place the marker (engine image pixels); the region of interest is `config.roiRadiusFraction` of the image height.
-    public func setMarker(x: Float, y: Float) {
+    private func beginTracking(x: Float, y: Float) {
         marker = (x, y)
-        resetAll()
+        resetMeasurement()
         state = .calibrating
     }
 
-    public func clearMarker() {
+    private func clearTracking() {
         marker = nil
-        resetAll()
+        resetMeasurement()
         state = .idle
     }
 
-    private func resetAll() {
+    private func resetMeasurement() {
         tracks.removeAll()
         estimator.removeAll()
         angle.reset()
@@ -248,7 +243,6 @@ public final class RotationEngine {
         inconsistentAxisCount = 0
         calibrationStartFrame = frameIndex
         thetaMin = 0; thetaMax = 0
-        thetaHistory.removeAll()
         lastAngleOkFrame = -1000
         lastRelocFrame = -1000
         fusion.reset()
@@ -258,7 +252,6 @@ public final class RotationEngine {
         lastInlierCount = 0
         lastAngleOk = false
         lostSince = nil
-        locator.reset()
     }
 
     private func restartCalibration() {
@@ -270,7 +263,6 @@ public final class RotationEngine {
         inconsistentAxisCount = 0
         calibrationStartFrame = frameIndex
         thetaMin = 0; thetaMax = 0
-        thetaHistory.removeAll()
         fusion.reset()
         for t in tracks { t.lastChordFrame = -1000 }
         state = .calibrating
@@ -289,50 +281,56 @@ public final class RotationEngine {
             prevPyramid = pyramid
             lastTimestamp = input.timestamp
         }
-        let dt: Double = {
-            guard let lt = lastTimestamp else { return 1.0 / 60.0 }
-            let d = input.timestamp - lt
-            return d > 0 && d < 0.5 ? d : 1.0 / 60.0
-        }()
+        let frameDT = lastTimestamp.map { input.timestamp - $0 } ?? 0
+        let dt = frameDT > 0 && frameDT < 0.5 ? frameDT : 1.0 / 60.0
 
         let roiRadius = Float(config.roiRadiusFraction) * Float(input.image.height)
-        if marker == nil, config.autoMarker,
-           let hit = locator.add(image: input.image, prev: prevPyramid, cur: pyramid,
-                                 pose: input.poseValid ? input.cameraToWorld : nil, dt: dt, time: input.timestamp,
-                                 radius: roiRadius, klt: klt, corners: corners) {
-            setMarker(x: hit.x, y: hit.y)
+        let retainedIDs = Set(tracks.map { $0.id })
+        locator.maxPoints = max(120, config.targetTrackCount + 80)
+        locator.maxResidual = config.maxResidual
+        let hit = locator.add(image: input.image, prev: prevPyramid, cur: pyramid,
+                              pose: input.poseValid ? input.cameraToWorld : nil, dt: frameDT, time: input.timestamp,
+                              radius: roiRadius, klt: klt, corners: corners, retaining: retainedIDs)
+        if let hit {
+            if let m = marker {
+                let nearbyMoving = locator.points.filter {
+                    let dx = $0.x - m.x, dy = $0.y - m.y
+                    return $0.speed > locator.movingSpeed && dx * dx + dy * dy < roiRadius * roiRadius
+                }.count
+                let dx = hit.x - m.x, dy = hit.y - m.y
+                if nearbyMoving < locator.minMoving && dx * dx + dy * dy > roiRadius * roiRadius / 4 {
+                    beginTracking(x: hit.x, y: hit.y)
+                }
+            } else {
+                beginTracking(x: hit.x, y: hit.y)
+            }
         }
         guard let marker = marker.map({ Marker(x: $0.x, y: $0.y, radius: roiRadius) }) else {
             out.state = .idle
-            out.message = config.autoMarker ? "Cherche un objet en mouvement… \(locator.movingCount) pts mobiles" : "Touchez l'objet à suivre"
+            out.message = "Cherche un objet en mouvement… \(locator.movingCount) pts mobiles"
             out.processingMillis = Date().timeIntervalSince(t0) * 1000
             return out
         }
 
-        // 1. Track existing points. The correspondences are kept: they also give the image-plane rotation,
-        //    which cross-checks the 3D geometry later in this frame.
+        // 1. Reuse the motion search's correspondences; each corner is tracked only once per frame.
+        let existing = Dictionary(uniqueKeysWithValues: tracks.map { ($0.id, $0) })
+        let selected = locator.selected(around: marker, retaining: Set(existing.keys), limit: config.targetTrackCount)
         var before: [(Float, Float)] = []
         var after: [(Float, Float)] = []
-        if let prev = prevPyramid, prev.levels[0].width == pyramid.levels[0].width {
-            var survivors: [Track] = []
-            survivors.reserveCapacity(tracks.count)
-            before.reserveCapacity(tracks.count)
-            after.reserveCapacity(tracks.count)
-            let roi2 = marker.radius * marker.radius * 1.3 * 1.3
-            for t in tracks {
-                let r = klt.track(prev: prev, cur: pyramid, x: t.x, y: t.y)
-                if !r.ok || r.residual > config.maxResidual { continue }
-                let dx = r.x - marker.x, dy = r.y - marker.y
-                if dx * dx + dy * dy > roi2 { continue }
-                before.append((t.x, t.y))
-                after.append((r.x, r.y))
-                t.x = r.x; t.y = r.y; t.age += 1
-                survivors.append(t)
+        tracks = selected.map { p in
+            let t: Track
+            if let old = existing[p.id] {
+                t = old
+                before.append((p.previousX, p.previousY))
+                after.append((p.x, p.y))
+                t.age += 1
+            } else {
+                t = Track(id: p.id, x: p.x, y: p.y)
             }
-            tracks = survivors
-        } else {
-            tracks.removeAll()
+            t.x = p.x; t.y = p.y
+            return t
         }
+        angle.removeAllExcept(ids: Set(tracks.map { $0.id }))
 
         // 2. Depth → 3D samples in world coordinates.
         let w = Double(input.image.width), h = Double(input.image.height)
@@ -398,9 +396,6 @@ public final class RotationEngine {
             } else {
                 rpmFiltered *= 0.9
             }
-            thetaHistory.append(up.ok ? up.theta : nil)
-            if thetaHistory.count > 120 { thetaHistory.removeFirst(thetaHistory.count - 120) }
-            removeStaticTracks(dmin: dmin)
         }
         lastAngleOk = angleOk
 
@@ -448,9 +443,9 @@ public final class RotationEngine {
             }
             if state == .lost {
                 if lostSince == nil { lostSince = input.timestamp }
-                if config.autoMarker, input.timestamp - lostSince! > config.autoMarkerLostSeconds {
+                if input.timestamp - lostSince! > config.reacquisitionDelaySeconds {
                     // The object is gone: look for a moving one again.
-                    clearMarker()
+                    clearTracking()
                     out.state = .idle
                     out.processingMillis = Date().timeIntervalSince(t0) * 1000
                     return out
@@ -462,17 +457,6 @@ public final class RotationEngine {
                        healthy: geometryHealthy, omega: angle.lastDelta / dt, dt: dt)
         case .idle:
             break
-        }
-
-        // 7. Replenish tracks.
-        if tracks.count < config.targetTrackCount && (frameIndex % 5 == 0 || tracks.count < config.targetTrackCount / 3) {
-            let existing = tracks.map { ($0.x, $0.y) }
-            let fresh = corners.detect(in: input.image, centerX: marker.x, centerY: marker.y, radius: marker.radius,
-                                       exclude: existing, maxCount: config.targetTrackCount - tracks.count)
-            for (x, y) in fresh {
-                tracks.append(Track(id: nextId, x: x, y: y))
-                nextId += 1
-            }
         }
 
         // 8. Output.
@@ -604,26 +588,6 @@ public final class RotationEngine {
         angle.rebase(obs)
     }
 
-    /// Background points do not move while the object turns; drop them.
-    private func removeStaticTracks(dmin: Double) {
-        let span = 60
-        guard thetaHistory.count > span, let now = thetaHistory[thetaHistory.count - 1],
-              let before = thetaHistory[thetaHistory.count - 1 - span] else { return }
-        if abs(now - before) < 20 * .pi / 180 { return }
-        var removed: [Int] = []
-        tracks.removeAll { t in
-            guard let last = t.samples.last, let first = t.samples.first(where: { frameIndex - $0.frame <= span }),
-                  last.frame - first.frame >= span - 5 else { return false }
-            var maxD = 0.0
-            for s in t.samples where s.frame >= first.frame {
-                maxD = max(maxD, (s.p - last.p).length)
-            }
-            if maxD < dmin { removed.append(t.id); return true }
-            return false
-        }
-        if !removed.isEmpty { angle.remove(ids: removed) }
-    }
-
     /// Fuse the appearance measurement into the integrated angle. Returns nothing: everything it does is either
     /// a bounded correction of `angle`, or bookkeeping on the library.
     private func relocalise(image: GrayImage, marker: Marker,
@@ -654,7 +618,7 @@ public final class RotationEngine {
 
     private func statusMessage(_ out: EngineOutput) -> String {
         switch out.state {
-        case .idle: return "Touchez l'objet à suivre"
+        case .idle: return "Cherche un objet en mouvement…"
         case .calibrating:
             if out.trackCount < 10 { return "Pas assez de texture / profondeur autour du repère" }
             if out.constraintCount < 150 { return "Faites tourner l'objet…" }

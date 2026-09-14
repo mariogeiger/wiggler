@@ -11,7 +11,7 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
     /// Latest engine output for the overlays (published at ~30 Hz).
     @Published private(set) var output = EngineOutput()
     /// Marker in engine image coordinates (pixels of the 480x360 landscape image), nil while the engine is idle.
-    /// Placed by the engine itself on the moving textured region, or by a tap.
+    /// Placed by the engine itself on the moving textured region.
     @Published private(set) var markerImagePoint: CGPoint?
     /// Number of tracked points the engine aims for. Persisted across launches.
     @Published private(set) var targetTrackCount = EngineConfig().targetTrackCount {
@@ -120,18 +120,6 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
     }
 
     // MARK: Controls (main thread)
-
-    /// Called with a touch location in view coordinates: overrides the automatic placement.
-    func placeMarker(viewPoint: CGPoint) {
-        lock.lock()
-        let t = latestDisplayTransform
-        let size = viewportSize
-        lock.unlock()
-        guard size.width > 1, size.height > 1 else { return }
-        let n = CGPoint(x: viewPoint.x / size.width, y: viewPoint.y / size.height).applying(t.inverted())
-        let p = CGPoint(x: n.x * CGFloat(FrameConverter.engineWidth), y: n.y * CGFloat(FrameConverter.engineHeight))
-        engineQueue.async { [engine] in engine.setMarker(x: Float(p.x), y: Float(p.y)) }
-    }
 
     func adjustTrackCount(by delta: Int) {
         targetTrackCount = Self.clampTrackCount(targetTrackCount + delta)

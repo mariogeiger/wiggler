@@ -209,8 +209,6 @@ final class EngineEndToEndTests: XCTestCase {
         config.constraintWindowFrames = 600
         config.roiRadiusFraction = Double(scene.projectedRadius() * 1.15) / Double(scene.height)
         let engine = RotationEngine(config: config)
-        let (mx, my) = scene.projectedCenter()
-        engine.setMarker(x: mx, y: my)
         var theta = 0.0
         var lockedAt: Int?
         var thetaAtLock = 0.0

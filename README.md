@@ -38,9 +38,10 @@ comportements qui comptent).
 ## Utilisation
 
 1. Fixer le téléphone en portrait, l'objet dans le champ.
-2. Toucher l'objet à l'écran : une croix apparaît ; les points sont cherchés dans un large disque autour d'elle.
-   Toucher ailleurs, ou glisser, déplace le repère. Chaque déplacement relance l'algorithme depuis zéro — c'est
-   fait pour « jouer avec le point » et déboguer.
+2. Faire bouger l'objet : la zone et les points sont choisis automatiquement, sans toucher l'écran.
+   Une croix indique la zone détectée. Le moteur explore aussi le reste de l'image ; les points devenus
+   immobiles sont remplacés par des points en mouvement. Si tout s'arrête, les pistes existantes sont conservées.
+   Si une autre zone devient active et que la première ne bouge plus, la calibration repart sur la nouvelle zone.
 3. Faire tourner l'objet. État « calibration » : l'app collecte des cordes 3D jusqu'à trouver un axe bien
    conditionné, puis attend un tour complet (compteur 0→360°). État « verrouillé » : l'axe est affiché (ligne
    cyan, cylindre translucide, anneau à la base) et le rayon orange tourne avec la pièce.
@@ -59,11 +60,18 @@ que convertir les frames ARKit, appeler le moteur et dessiner.
 
 ### 1. Suivi de points (image)
 
-Image luma réduite à 480×360. Coins de Shi–Tomasi détectés dans le disque autour du repère, suivis d'une frame
-à l'autre par un Lucas–Kanade pyramidal (4 niveaux, fenêtre 9×9) : à 100 tr/min et 60 fps un point du bord
-bouge d'une quinzaine de pixels, ce que la pyramide absorbe. Les pistes sont tuées quand le résidu photométrique
-monte (occlusion par la main), quand elles sortent de la région, ou quand elles s'avèrent statiques (fond).
-Le stock de pistes est réapprovisionné en continu (~160 points).
+Image luma réduite à 480×360. `MotionLocator` explore l'image par petites régions et détecte des coins de
+Shi–Tomasi. Un Lucas–Kanade pyramidal (4 niveaux, fenêtre 9×9) mesure leur déplacement : à 100 tr/min et 60 fps
+un point du bord bouge d'une quinzaine de pixels, ce que la pyramide absorbe. Chaque point n'est suivi qu'une
+fois par frame ; les mêmes correspondances servent à choisir la zone et à mesurer la rotation.
+
+La zone initiale est une concentration stable de coins mobiles. Les mouvements de caméra et les poses ARKit
+invalides suspendent la sélection. Les nouveaux points sont activés selon leur vitesse mesurée, pas seulement
+leur contraste, même sans profondeur et avant l'estimation de l'axe. Les pistes mobiles existantes gardent leur
+historique ; les pistes immobiles cèdent leur place lorsqu'il existe des candidats mobiles. Un arrêt de l'objet
+ne suffit donc pas à vider le suivi. Les points exploratoires expirent et sont redistribués pour ne pas rester
+bloqués sur un fond très texturé. Le budget par défaut est de 160 pistes de mesure et 80 points exploratoires.
+La recherche continue après acquisition, y compris pendant la calibration.
 
 ### 2. Points 3D (LiDAR + pose)
 
@@ -158,6 +166,7 @@ local correspond exactement à l'azimut mesuré par le moteur, donc le rayon ora
 | `minHealthyInliers` | 20 | points en dessous desquels la géométrie n'est plus « saine » |
 | `staleLibrarySeconds` | 2.0 | contradiction avant reconstruction de la bibliothèque d'aspect |
 | `keyframeBins` | 36 | vignettes par tour (10°) |
+| `reacquisitionDelaySeconds` | 5.0 | délai de recherche après perte de l’angle |
 
 ## Limites connues / pistes
 

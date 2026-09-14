@@ -29,11 +29,6 @@ struct ContentView: View {
                 markerOverlay
                     .allowsHitTesting(false)
 
-                // A tap places the marker; the controls above keep their own taps.
-                Color.clear
-                    .contentShape(Rectangle())
-                    .onTapGesture(coordinateSpace: .local) { p in controller.placeMarker(viewPoint: p) }
-
                 // Everything lives at the top so the hand turning the object never covers a control.
                 VStack(spacing: 10) {
                     HStack(alignment: .top) {
