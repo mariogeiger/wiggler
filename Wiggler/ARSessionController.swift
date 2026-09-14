@@ -19,6 +19,8 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
     @Published var sessionMessage = ""
     @Published private(set) var recorderStatus = SessionRecorder.Status(recording: false, seconds: 0, megabytes: 0, frames: 0, fileName: "")
     @Published private(set) var recordingCount = SessionRecorder.recordings().count
+    /// Set when a recording stops: the view presents the export sheet for it.
+    @Published var pendingShare: ShareItem?
     /// Processed frame rate, dropped frames and camera format (debug line in the HUD).
     @Published private(set) var statsLine = ""
 
@@ -103,8 +105,10 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
 
     func toggleRecording() {
         if recorder.isRecording {
+            let url = recorder.url
             recorder.stop()
             recordingCount = SessionRecorder.recordings().count
+            if let u = url { pendingShare = ShareItem(url: u) }
         } else {
             recorder.start()
         }

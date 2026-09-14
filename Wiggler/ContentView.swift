@@ -88,28 +88,36 @@ struct ContentView: View {
     // MARK: Recording (small, discreet)
 
     private var recordButton: some View {
-        HStack(spacing: 10) {
-            if controller.recordingCount > 0 && !controller.recorderStatus.recording {
-                ShareLink(items: SessionRecorder.recordings()) {
-                    Image(systemName: "square.and.arrow.up").font(.title3)
+        Button {
+            controller.toggleRecording()
+        } label: {
+            let st = controller.recorderStatus
+            HStack(spacing: 6) {
+                Circle().fill(st.recording ? Color.red : Color.white.opacity(0.7)).frame(width: 14, height: 14)
+                if st.recording {
+                    Text(String(format: "%.0f s", st.seconds)).font(.caption.monospacedDigit()).foregroundStyle(.white)
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(.white.opacity(0.7))
             }
-            Button {
-                controller.toggleRecording()
-            } label: {
-                let st = controller.recorderStatus
-                HStack(spacing: 6) {
-                    Circle().fill(st.recording ? Color.red : Color.white.opacity(0.7)).frame(width: 14, height: 14)
-                    if st.recording {
-                        Text(String(format: "%.0f s", st.seconds)).font(.caption.monospacedDigit()).foregroundStyle(.white)
-                    }
-                }
-                .padding(8)
-                .background(.black.opacity(0.35), in: Capsule())
-            }
-            .buttonStyle(.plain)
+            .padding(8)
+            .background(.black.opacity(0.35), in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .sheet(item: $controller.pendingShare) { item in
+            // Export prompt opened automatically when a recording stops.
+            ShareSheet(items: [item.url])
         }
     }
+}
+
+struct ShareItem: Identifiable {
+    let url: URL
+    var id: String { url.path }
+}
+
+struct ShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
