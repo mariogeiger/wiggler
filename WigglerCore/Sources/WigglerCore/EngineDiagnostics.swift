@@ -127,9 +127,20 @@ public struct EngineDiagnostics: Codable {
         public var action: String
         public var reason: String
         public var kltOK: Bool?
+        /// Mean absolute patch residual, absent when no finite comparison was computed.
         public var residual: Float?
         public var x: Float
         public var y: Float
+
+        init(id: Int, action: String, reason: String, kltOK: Bool? = nil, residual: Float? = nil, x: Float, y: Float) {
+            self.id = id
+            self.action = action
+            self.reason = reason
+            self.kltOK = kltOK
+            self.residual = residual.flatMap { $0.isFinite ? $0 : nil }
+            self.x = x
+            self.y = y
+        }
     }
 
     public struct LocatorPoint: Codable {
