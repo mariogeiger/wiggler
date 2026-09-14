@@ -38,8 +38,10 @@ public struct DipoleMap {
 
     /// Total weight in the window as a fraction of its e-folding length (→ 1 after many turns).
     public var fill: Double { s0 / window }
-    /// One full turn of angle has been accumulated: the coefficient is determined, not extrapolated.
-    public var hasFullTurn: Bool { s0 >= window * (1 - exp(-2 * .pi / window)) }
+    /// Progress towards one full turn of accumulated angle, 0…1. Below 1 the coefficient would be extrapolated
+    /// from an arc, not measured; above, the speed no longer matters.
+    public var turnProgress: Double { min(1, s0 / (window * (1 - exp(-2 * .pi / window)))) }
+    public var hasFullTurn: Bool { turnProgress >= 1 }
 
     /// Add a frame observed at angle θ. A jump of more than a quarter turn means the angle reference changed:
     /// the map is reset and `false` returned.

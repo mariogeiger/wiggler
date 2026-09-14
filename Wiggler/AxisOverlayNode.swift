@@ -38,9 +38,9 @@ final class AxisOverlayNode: SCNNode {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    /// Called on the SceneKit render thread.
-    func update(with out: EngineOutput) {
-        guard let axis = out.axis, out.state != .idle else {
+    /// Called on the SceneKit render thread. `hidden` withdraws the whole node (another overlay has the screen).
+    func update(with out: EngineOutput, hidden: Bool) {
+        guard !hidden, let axis = out.axis, out.state != .idle else {
             isHidden = true
             return
         }

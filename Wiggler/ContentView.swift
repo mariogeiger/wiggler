@@ -143,6 +143,13 @@ struct ContentView: View {
         HStack(spacing: 2) {
             dipoleButton(nil, "off")
             ForEach(DipoleMap.Display.allCases, id: \.self) { dipoleButton($0, $0.label) }
+            if controller.dipoleDisplay != nil, controller.output.state == .locked, controller.dipoleProgress < 1 {
+                // First turn not yet accumulated: the overlay appears at 100 %.
+                Text("\(Int(controller.dipoleProgress * 100)) %")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.white.opacity(0.6))
+                    .padding(.horizontal, 6)
+            }
         }
         .padding(3)
         .background(.black.opacity(0.35), in: Capsule())

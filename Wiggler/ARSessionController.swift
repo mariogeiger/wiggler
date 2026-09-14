@@ -26,6 +26,8 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
     private static let dipoleDisplayKey = "dipoleDisplay"
     /// Latest rendered dipole overlay (engine image size), nil when hidden.
     @Published private(set) var dipoleImage: CGImage?
+    /// Fraction of the first full turn the dipole map has accumulated (it is drawn from 1).
+    @Published private(set) var dipoleProgress = 0.0
     @Published private(set) var recorderStatus = SessionRecorder.Status(recording: false, seconds: 0, megabytes: 0, frames: 0, fileName: "")
     /// Set when a recording stops: the view presents the export sheet for it.
     @Published var pendingShare: ShareItem?
@@ -56,12 +58,13 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
     // Dipole map (engine queue). It accumulates whenever the angle is tracked, so switching the display on is instant.
     private var dipole = DipoleMap(width: FrameConverter.engineWidth, height: FrameConverter.engineHeight)
     private var dipoleDisplayEngine: DipoleMap.Display?
+    /// The dipole overlay is on screen (engine queue; mirrored under `lock` for the render thread, which then
+    /// withdraws the axis and ray so the colours are not drawn over).
     private var dipoleShown = false
+    private var dipoleShownForRender = false
     private var lastDipoleRender = Date.distantPast
     /// Fully opaque at this luma modulation (20 of 255 levels).
     private let dipoleFullScale: Float = 20 / 255
-    /// Below this speed the window takes too long to fill for the map to mean anything: keep it hidden.
-    private let dipoleMinRPM = 10.0
 
     override init() {
         super.init()
@@ -212,8 +215,10 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
             if now.timeIntervalSince(lastPublish) > 1.0 / 30.0 {
                 lastPublish = now
                 let status = recorder.status(now: input.timestamp)
+                let progress = dipole.turnProgress
                 DispatchQueue.main.async { [weak self] in
                     self?.output = out
+                    self?.dipoleProgress = progress
                     self?.markerImagePoint = out.marker.map { CGPoint(x: CGFloat($0.x), y: CGFloat($0.y)) }
                     self?.recorderStatus = status
                 }
@@ -229,16 +234,18 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
         case .idle, .calibrating: dipole.reset()  // the angle reference is about to change
         }
         let now = Date()
-        let show = dipoleDisplayEngine != nil && out.state == .locked && abs(out.rpm) > dipoleMinRPM && dipole.hasFullTurn
+        let show = dipoleDisplayEngine != nil && out.state == .locked && dipole.hasFullTurn
         if show {
             guard now.timeIntervalSince(lastDipoleRender) > 1.0 / 15.0, let display = dipoleDisplayEngine,
                   let rgba = dipole.render(display, theta: out.theta, fullScale: dipoleFullScale) else { return }
             lastDipoleRender = now
             let image = CGImage.rgba8(width: dipole.width, height: dipole.height, bytes: rgba)
             dipoleShown = image != nil
+            lock.lock(); dipoleShownForRender = dipoleShown; lock.unlock()
             DispatchQueue.main.async { [weak self] in self?.dipoleImage = image }
         } else if dipoleShown {
             dipoleShown = false
+            lock.lock(); dipoleShownForRender = false; lock.unlock()
             DispatchQueue.main.async { [weak self] in self?.dipoleImage = nil }
         }
     }
@@ -248,7 +255,8 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
     func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
         lock.lock()
         let out = latestOutput
+        let hidden = dipoleShownForRender
         lock.unlock()
-        overlay.update(with: out)
+        overlay.update(with: out, hidden: hidden)
     }
 }
