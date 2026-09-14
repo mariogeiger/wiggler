@@ -86,9 +86,14 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
             config.videoFormat = f
         }
         sceneView.session.run(config, options: [.resetTracking, .removeExistingAnchors])
+        // A measurement session is hands-off by nature: the phone must not lock while the camera is running.
+        UIApplication.shared.isIdleTimerDisabled = true
     }
 
-    func pause() { sceneView.session.pause() }
+    func pause() {
+        sceneView.session.pause()
+        UIApplication.shared.isIdleTimerDisabled = false
+    }
 
     // MARK: Controls (main thread)
 
