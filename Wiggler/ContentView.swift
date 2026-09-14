@@ -161,7 +161,7 @@ struct ContentView: View {
         }
         .buttonStyle(.plain)
         .sheet(item: $controller.pendingShare) { item in
-            // Export prompt opened automatically when a recording stops (all parts of the session).
+            // Export prompt opened automatically when a recording stops.
             ShareSheet(items: item.urls)
         }
     }

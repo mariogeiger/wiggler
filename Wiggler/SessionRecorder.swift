@@ -1,7 +1,7 @@
 import Foundation
 import WigglerCore
 
-/// Records the exact inputs the engine sees (downscaled luma, LiDAR depth + confidence, intrinsics, pose) plus the
+/// Records sampled inputs the engine sees (downscaled luma, LiDAR depth + confidence, intrinsics, pose) plus the
 /// engine's outputs, so a session can be replayed and studied offline.
 ///
 /// File format (`.wig`), all integers little-endian:
@@ -12,14 +12,9 @@ final class SessionRecorder {
     private let queue = DispatchQueue(label: "ch.mariogeiger.wiggler.recorder", qos: .utility)
     private var handle: FileHandle?
     private(set) var url: URL?
-    /// All files of the current/last session (a session is split in ~250 MB parts).
-    private(set) var sessionURLs: [URL] = []
     private var startTime: Double?
     private var written: Int64 = 0
     private var frames = 0
-    private var maxBytesPerFile: Int64 = 250 * 1024 * 1024
-    private var fileIndex = 0
-    private var sessionName = ""
 
     var isRecording: Bool { handle != nil }
 
@@ -42,30 +37,23 @@ final class SessionRecorder {
     }
 
     func start() {
-        let f = DateFormatter()
-        f.dateFormat = "yyyyMMdd-HHmmss"
-        sessionName = "wiggler-" + f.string(from: Date())
-        sessionURLs = []
-        fileIndex = 0
+        stop()
+        url = nil
+        written = 0
         frames = 0
         startTime = nil
-        openNextFile()
-    }
-
-    private func openNextFile() {
-        handle?.closeFile()
-        let name = fileIndex == 0 ? "\(sessionName).wig" : "\(sessionName)-part\(fileIndex).wig"
-        let u = Self.documentsDirectory.appendingPathComponent(name)
-        FileManager.default.createFile(atPath: u.path, contents: nil)
-        guard let h = try? FileHandle(forWritingTo: u) else { return }
+        let f = DateFormatter()
+        f.dateFormat = "yyyyMMdd-HHmmss"
+        let sessionName = "wiggler-" + f.string(from: Date())
+        let u = Self.documentsDirectory.appendingPathComponent("\(sessionName).wig")
+        guard FileManager.default.createFile(atPath: u.path, contents: nil),
+            let h = try? FileHandle(forWritingTo: u)
+        else { return }
         handle = h
         url = u
-        sessionURLs.append(u)
-        written = 0
-        fileIndex += 1
         let header: [String: Any] = [
             "version": 1, "width": FrameConverter.engineWidth, "height": FrameConverter.engineHeight,
-            "session": sessionName, "part": fileIndex - 1,
+            "session": sessionName,
         ]
         writeChunk(try! JSONSerialization.data(withJSONObject: header))
     }
@@ -116,7 +104,6 @@ final class SessionRecorder {
             writeChunk(Self.compress(depthData))
             writeChunk(Self.compress(confData))
             frames += 1
-            if written > maxBytesPerFile { openNextFile() }
         }
     }
 

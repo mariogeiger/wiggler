@@ -30,9 +30,9 @@ appearance-period detection, and an end-to-end synthetic scene (a textured disk 
 with a depth map and noise).
 
 A hand-written `Wiggler.xcodeproj` is also provided (XcodeGen is not required). The app's Record button writes
-`.wig` files (480×360 image, depth, pose, engine outputs) that can be shared through AirDrop and replayed
-offline with `tools/replay.py`. Fusion strategies can be compared with `tools/fusion.py`, which can also inject
-an occlusion or a stale library to test those two key behaviors.
+one `.wig` file per session (480×360 image, depth, pose, engine outputs), streamed to disk without splitting.
+It can be shared through AirDrop and replayed offline with `tools/replay.py`. Fusion strategies can be compared
+with `tools/fusion.py`, which can also inject an occlusion or a stale library to test those two key behaviors.
 
 ## Swift lint and formatting
 
