@@ -137,3 +137,19 @@ local correspond exactement à l'azimut mesuré par le moteur, donc le rayon ora
 * Une pièce parfaitement lisse ET de révolution n'offre ni texture ni asymétrie : rien à suivre — par
   construction l'app ne prédit rien dans ce cas.
 * Le LiDAR est bruité sur les bords (rejet par médiane) et sous ~20 cm ; entre 30 cm et 2 m tout va bien.
+
+## Journal d'essais (14 sept. 2026, chaise de bureau + boîte)
+
+* **Perf** : le package compilé sans `-O` prenait 60–400 ms/image ; avec `-O` forcé dans `Package.swift`, 2–5 ms.
+* **Boîte au bord de l'assise** : échec — le LiDAR (256×192, lissé) attribue aux points de la boîte la profondeur
+  du sol derrière. Ajout d'un rejet des sauts de profondeur par piste (> 8 %). Règle pratique : viser l'intérieur
+  de la silhouette de profondeur.
+* **Recalibrations intempestives** : l'axe ré-estimé bougeait de 3–8 cm (chaise qui roule) → tolérance élargie et
+  *adoption* douce du nouvel axe au lieu d'un retour en calibration.
+* **Objet tenu en main** (pas d'axe fixe) : jamais verrouillé, planarité ≈ 0,4 — comportement voulu.
+* **Enregistrement `wiggler-20260914-154441`** : verrouillé après un tour (10 s), bibliothèque d'aspect complète à
+  14 s, confiance 0,8–0,99, dispersion 1–3°, passage de la main et inversion de sens encaissés.
+* ARKit livre ~20 fps après quelques minutes (contrainte thermique) ; le moteur n'est pas le goulot.
+
+Outils : `tools/wigreader.py` (lecture des `.wig`), `tools/replay.py` (rejeu complet avec OpenCV, rapport PNG),
+`tools/diag_tracks.py` (ajustement de cercles par piste).
