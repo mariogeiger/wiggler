@@ -49,7 +49,6 @@ final class AxisOverlayNode: SCNNode {
         rayPivot.addChildNode(ray)
 
         addChildNode(axisLine)
-        addChildNode(cylinder)
         addChildNode(rayPivot)
         renderingOrder = 10
     }
@@ -74,23 +73,15 @@ final class AxisOverlayNode: SCNNode {
             m41: Float(o.x), m42: Float(o.y), m43: Float(o.z), m44: 1)
 
         let radius = max(0.03, out.objectRadius)
-        var hMin = out.heightMin, hMax = out.heightMax
-        if hMax - hMin < 0.02 { hMin -= 0.01; hMax += 0.01 }
-        let pad = 0.15 * (hMax - hMin) + 0.01
-        hMin -= pad; hMax += pad
-        let key = String(format: "%.3f/%.3f/%.3f", radius, hMin, hMax)
+        let key = String(format: "%.3f", radius)
         if key != lastGeometryKey {
             lastGeometryKey = key
-            (cylinder.geometry as? SCNCylinder)?.radius = CGFloat(radius)
-            (cylinder.geometry as? SCNCylinder)?.height = CGFloat(hMax - hMin)
-            cylinder.position = SCNVector3(0, Float(0.5 * (hMin + hMax)), 0)
-            (baseRing.geometry as? SCNTorus)?.ringRadius = CGFloat(radius)
-            baseRing.position = SCNVector3(0, Float(hMin), 0)
-            let lineLength = max(0.6, 3 * (hMax - hMin))
-            (axisLine.geometry as? SCNCylinder)?.height = CGFloat(lineLength)
-            axisLine.position = SCNVector3(0, Float(0.5 * (hMin + hMax)), 0)
-            ray.scale = SCNVector3(Float(radius * 1.35), Float(hMax - hMin), 1)
-            ray.position = SCNVector3(Float(0.5 * radius * 1.35), Float(0.5 * (hMin + hMax)), 0)
+            // The ray and the axis line run "from -inf to +inf" along the axis (4 m is plenty on screen).
+            let span: Float = 4
+            (axisLine.geometry as? SCNCylinder)?.height = CGFloat(span)
+            axisLine.position = SCNVector3(0, 0, 0)
+            ray.scale = SCNVector3(Float(radius * 1.35), span, 1)
+            ray.position = SCNVector3(Float(0.5 * radius * 1.35), 0, 0)
         }
         // The ray turns with the object; hide it when the angle is not trustworthy.
         let visible = out.state == .locked && out.angleConfidence > 0.15
