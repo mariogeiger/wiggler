@@ -50,7 +50,6 @@ final class AxisOverlayNode: SCNNode {
 
         addChildNode(axisLine)
         addChildNode(cylinder)
-        addChildNode(baseRing)
         addChildNode(rayPivot)
         renderingOrder = 10
     }
