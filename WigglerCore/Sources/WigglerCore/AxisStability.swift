@@ -3,8 +3,8 @@ import Foundation
 /// Confirms an axis with fresh estimates and checks new chords before old observations can outvote them.
 struct AxisStability {
     private(set) var confirmations = 0
-    private var newestFrame = -1
-    private var inconsistentBatches = 0
+    private(set) var newestFrame = -1
+    private(set) var inconsistentBatches = 0
 
     mutating func reset() {
         confirmations = 0
@@ -25,7 +25,18 @@ struct AxisStability {
     func isStable(required: Int) -> Bool { inconsistentBatches == 0 && confirmations >= max(1, required) }
 
     /// A suspect batch hides the map immediately; persistent contradictions restart calibration.
-    mutating func observe(chords: [ChordConstraint], axis: Axis, tolerance: Double, required: Int) -> Bool {
+    mutating func observe(
+        chords: [ChordConstraint], axis: Axis, tolerance: Double, required: Int,
+        diagnostics: EngineDiagnosticsRecorder? = nil
+    ) -> Bool {
+        let confirmationsBefore = confirmations
+        let inconsistentBefore = inconsistentBatches
+        defer {
+            diagnostics?.observeChordBatch(
+                chords, axis: axis, tolerance: tolerance, required: required,
+                confirmationsBefore: confirmationsBefore, confirmationsAfter: confirmations,
+                inconsistentBefore: inconsistentBefore, inconsistentAfter: inconsistentBatches)
+        }
         guard chords.count >= 8 else { return false }
         if Self.rejects(chords, axis: axis, tolerance: tolerance) {
             invalidate()

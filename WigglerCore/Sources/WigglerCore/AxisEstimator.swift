@@ -1,7 +1,7 @@
 import Foundation
 
 /// A rotation axis in world coordinates, with the object's extent for display.
-public struct Axis: Equatable {
+public struct Axis: Equatable, Codable {
     /// A point on the axis (chosen near the object's centroid height).
     public var origin: V3
     /// Unit direction.
@@ -33,7 +33,7 @@ public struct Axis: Equatable {
 
 /// One "chord" observation: a material point moved from a to b; the chord (b - a) is perpendicular to the
 /// axis direction, and the segment from the axis to the chord midpoint is perpendicular to the chord.
-public struct ChordConstraint {
+public struct ChordConstraint: Codable {
     public var midpoint: V3
     public var chord: V3
     public var frame: Int

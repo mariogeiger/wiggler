@@ -1,6 +1,6 @@
 import Foundation
 
-public struct AngleObservation {
+public struct AngleObservation: Codable {
     public var id: Int
     /// Azimuth of the tracked point around the axis (radians).
     public var phi: Double
@@ -13,7 +13,7 @@ public struct AngleObservation {
     }
 }
 
-public struct AngleUpdate {
+public struct AngleUpdate: Codable {
     public var theta: Double
     public var delta: Double
     public var inlierCount: Int
@@ -53,6 +53,12 @@ public struct AngleTracker {
     }
 
     public mutating func update(_ observations: [AngleObservation]) -> AngleUpdate {
+        update(observations, diagnostics: nil)
+    }
+
+    mutating func update(_ observations: [AngleObservation], diagnostics: EngineDiagnosticsRecorder?) -> AngleUpdate {
+        diagnostics?.value.geometry?.angleTracksBefore = diagnosticTracks()
+        defer { diagnostics?.value.geometry?.angleTracksAfter = diagnosticTracks() }
         var cand: [(id: Int, value: Double, w: Double)] = []
         cand.reserveCapacity(observations.count)
         var radii: [Double] = []
@@ -60,12 +66,14 @@ public struct AngleTracker {
             radii.append(o.radius)
         }
         let rcap = radii.isEmpty ? 1 : 1.5 * median(radii)
+        diagnostics?.value.geometry?.radiusCap = rcap
         for o in observations {
             guard let s = states[o.id] else { continue }
             let r = min(o.radius, rcap)
             cand.append((o.id, wrapAngle(o.phi - s.offset), r * r))
         }
         var pred = theta + lastDelta
+        diagnostics?.value.geometry?.predictedTheta = pred
         var inliers = 0
         var dispersion = 0.0
         var ok = false
@@ -80,10 +88,14 @@ public struct AngleTracker {
                 }
                 if den > 0 { pred += num / den }
             }
+            diagnostics?.value.geometry?.thetaBeforeHardGate = pred
             // Final hard-gated pass.
             var num = 0.0, den = 0.0, sq = 0.0
             for c in cand {
                 let dev = wrapAngle(c.value - pred)
+                diagnostics?.value.geometry?.candidates.append(
+                    .init(
+                        id: c.id, value: c.value, weight: c.w, residual: dev, inlier: abs(dev) < gate))
                 if abs(dev) < gate {
                     num += c.w * dev
                     den += c.w
@@ -147,4 +159,13 @@ public struct AngleTracker {
 
     public func isConsistent(id: Int) -> Bool { (states[id]?.badCount ?? 1) == 0 }
     public var trackedCount: Int { states.count }
+}
+
+extension AngleTracker {
+    func diagnosticTracks() -> [EngineDiagnostics.AngleTrack] {
+        states.keys.sorted().map { id in
+            let state = states[id]!
+            return .init(id: id, offset: state.offset, badCount: state.badCount, age: state.age)
+        }
+    }
 }

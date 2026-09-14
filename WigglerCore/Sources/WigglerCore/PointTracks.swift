@@ -26,7 +26,10 @@ final class PointTracks {
     var count: Int { tracks.count }
     var ids: Set<Int> { Set(tracks.map { $0.id }) }
 
-    func removeAll() {
+    func removeAll(diagnostics: EngineDiagnosticsRecorder? = nil) {
+        diagnostics?.value.trackUpdates.append(
+            .init(
+                reason: "measurementReset", selectedIDs: [], addedIDs: [], removedIDs: tracks.map { $0.id }))
         tracks.removeAll()
     }
 
@@ -36,7 +39,16 @@ final class PointTracks {
 
     /// Adopt selected image correspondences while preserving the depth history of surviving identities.
     @discardableResult
-    func update(_ selected: [MotionLocator.Point]) -> (before: [(Float, Float)], after: [(Float, Float)]) {
+    func update(_ selected: [MotionLocator.Point], diagnostics: EngineDiagnosticsRecorder? = nil)
+        -> (before: [(Float, Float)], after: [(Float, Float)])
+    {
+        if let diagnostics {
+            let selectedIDs = Set(selected.map { $0.id })
+            diagnostics.value.trackUpdates.append(
+                .init(
+                    selectedIDs: selected.map { $0.id }, addedIDs: selectedIDs.subtracting(ids).sorted(),
+                    removedIDs: ids.subtracting(selectedIDs).sorted()))
+        }
         let existing = Dictionary(uniqueKeysWithValues: tracks.map { ($0.id, $0) })
         var before: [(Float, Float)] = []
         var after: [(Float, Float)] = []
@@ -59,18 +71,45 @@ final class PointTracks {
 
     func sampleDepth(
         _ input: FrameInput, pose: RigidTransform, frame: Int,
-        minConfidence: UInt8, maxJumpFraction: Double, historyLength: Int
+        minConfidence: UInt8, maxJumpFraction: Double, historyLength: Int,
+        diagnostics: EngineDiagnosticsRecorder? = nil
     ) {
         let w = Double(input.image.width), h = Double(input.image.height)
         let K = input.intrinsics
         for t in tracks {
+            let evidence = diagnostics.map { _ in
+                DepthObservationRecorder(
+                    .init(
+                        id: t.id, x: t.x, y: t.y, previousDepth: t.lastDepth, rejectsBefore: t.depthRejects,
+                        minConfidence: minConfidence, maxJumpFraction: maxJumpFraction, rejectsAfter: t.depthRejects))
+            }
+            defer {
+                if var observed = evidence?.value {
+                    observed.rejectsAfter = t.depthRejects
+                    diagnostics?.value.depth.append(observed)
+                }
+            }
             t.hasDepthThisFrame = false
-            guard let depth = input.depth,
-                let z = depth.sample(u: Double(t.x) / w, v: Double(t.y) / h, minConfidence: minConfidence)
+            guard let depth = input.depth else { continue }
+            let observe: ((EngineDiagnostics.DepthNeighborhood) -> Void)? =
+                diagnostics == nil
+                ? nil
+                : {
+                    evidence?.value.neighborhood = $0
+                    evidence?.value.outcome = $0.outcome
+                }
+            guard
+                let z = depth.sample(
+                    u: Double(t.x) / w, v: Double(t.y) / h, minConfidence: minConfidence, observe: observe)
             else { continue }
+            evidence?.value.sampledDepth = z
+            evidence?.value.jumpLimit = maxJumpFraction * t.lastDepth
             if t.lastDepth > 0 && abs(z - t.lastDepth) > maxJumpFraction * t.lastDepth {
                 t.depthRejects += 1
-                if t.depthRejects < 4 { continue }
+                if t.depthRejects < 4 {
+                    evidence?.value.outcome = "depthJumpRejected"
+                    continue
+                }
             }
             t.depthRejects = 0
             t.lastDepth = z
@@ -78,14 +117,21 @@ final class PointTracks {
             let yc = (Double(t.y) - K.cy) / K.fy * z
             let cam = V3(xc, -yc, -z)
             let world = pose.apply(cam)
-            if !world.isFinite { continue }
+            evidence?.value.worldPoint = world
+            if !world.isFinite {
+                evidence?.value.outcome = "nonFiniteWorldPoint"
+                continue
+            }
+            evidence?.value.outcome = "accepted"
             t.samples.append((frame, world))
             if t.samples.count > historyLength { t.samples.removeFirst(t.samples.count - historyLength) }
             t.hasDepthThisFrame = true
         }
     }
 
-    func chordConstraints(frame: Int, minLength: Double, maxFrames: Int, stride: Int) -> [ChordConstraint] {
+    func chordConstraints(
+        frame: Int, minLength: Double, maxFrames: Int, stride: Int, diagnostics: EngineDiagnosticsRecorder? = nil
+    ) -> [ChordConstraint] {
         var constraints: [ChordConstraint] = []
         for t in tracks where t.hasDepthThisFrame && frame - t.lastChordFrame >= stride {
             guard let last = t.samples.last else { continue }
@@ -95,6 +141,11 @@ final class PointTracks {
                 let d = last.p - s.p
                 if d.length >= minLength {
                     constraints.append(ChordConstraint(midpoint: (last.p + s.p) * 0.5, chord: d, frame: frame))
+                    diagnostics?.value.freshChords.append(
+                        .init(
+                            trackID: t.id, start: .init(frame: s.frame, point: s.p),
+                            end: .init(frame: last.frame, point: last.p), constraint: constraints[constraints.count - 1]
+                        ))
                     t.lastChordFrame = frame
                     break
                 }
@@ -150,5 +201,21 @@ final class PointTracks {
             }
             return TrackDebug(x: t.x, y: t.y, status: status)
         }
+    }
+}
+
+extension PointTracks {
+    func diagnosticState() -> [EngineDiagnostics.Track] {
+        tracks.map {
+            .init(
+                id: $0.id, x: $0.x, y: $0.y, age: $0.age, hasDepthThisFrame: $0.hasDepthThisFrame,
+                lastDepth: $0.lastDepth, depthRejects: $0.depthRejects, lastChordFrame: $0.lastChordFrame,
+                sampleCount: $0.samples.count, oldestSampleFrame: $0.samples.first?.frame,
+                newestSampleFrame: $0.samples.last?.frame, radius: $0.radius, height: $0.height)
+        }
+    }
+
+    func diagnosticHistories() -> [EngineDiagnostics.TrackHistory] {
+        tracks.map { .init(id: $0.id, samples: $0.samples.map { .init(frame: $0.frame, point: $0.p) }) }
     }
 }

@@ -54,14 +54,14 @@ public struct AngleFusion {
         omegaHeld = 0
     }
 
-    public enum Outcome: String {
+    public enum Outcome: String, Codable {
         case noMeasurement  // nothing to compare against
         case gated  // a match exists but is outside the gate
         case ambiguous  // a clearly better match sits outside the gate: do not trust this measurement
         case updated  // the state was corrected
     }
 
-    public struct Candidate {
+    public struct Candidate: Codable {
         public var theta: Double
         public var score: Double
         public init(theta: Double, score: Double) {

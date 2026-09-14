@@ -1,7 +1,7 @@
 import Foundation
 
 /// Minimal 3-vector (Double) — no simd so the core stays portable/testable everywhere.
-public struct V3: Equatable, CustomStringConvertible {
+public struct V3: Equatable, Codable, CustomStringConvertible {
     public var x: Double
     public var y: Double
     public var z: Double
@@ -43,7 +43,7 @@ public struct V3: Equatable, CustomStringConvertible {
 }
 
 /// 3x3 matrix, row-major storage.
-public struct M3: Equatable {
+public struct M3: Equatable, Codable {
     public var m: [Double]  // 9 entries, row-major
     public init(_ m: [Double]) {
         precondition(m.count == 9)
@@ -145,7 +145,7 @@ public struct M3: Equatable {
 }
 
 /// Rigid transform p' = R p + t.
-public struct RigidTransform: Equatable {
+public struct RigidTransform: Equatable, Codable {
     public var rotation: M3
     public var translation: V3
     public init(rotation: M3, translation: V3) {
