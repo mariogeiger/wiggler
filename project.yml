@@ -1,0 +1,54 @@
+name: Wiggler
+options:
+  bundleIdPrefix: ch.mariogeiger
+  deploymentTarget:
+    iOS: "17.0"
+  xcodeVersion: "15.0"
+  createIntermediateGroups: true
+packages:
+  WigglerCore:
+    path: WigglerCore
+targets:
+  Wiggler:
+    type: application
+    platform: iOS
+    sources:
+      - path: Wiggler
+    dependencies:
+      - package: WigglerCore
+    info:
+      path: Wiggler/Info.plist
+      properties:
+        CFBundleDisplayName: Wiggler
+        CFBundleShortVersionString: "0.1"
+        CFBundleVersion: "1"
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UIRequiredDeviceCapabilities: [arkit, arm64]
+        NSCameraUsageDescription: "La caméra et le LiDAR servent à mesurer la rotation de l'objet."
+        UIRequiresFullScreen: true
+        ITSAppUsesNonExemptEncryption: false
+    settings:
+      base:
+        SWIFT_VERSION: "5.9"
+        TARGETED_DEVICE_FAMILY: "1"
+        DEVELOPMENT_TEAM: ""
+        CODE_SIGN_STYLE: Automatic
+        SWIFT_OPTIMIZATION_LEVEL: "-O"
+        ENABLE_TESTABILITY: false
+      configs:
+        Debug:
+          # The tracker is CPU-heavy: keep the optimiser on even in Debug builds.
+          SWIFT_OPTIMIZATION_LEVEL: "-O"
+          ONLY_ACTIVE_ARCH: true
+schemes:
+  Wiggler:
+    build:
+      targets:
+        Wiggler: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - WigglerCore/WigglerCoreTests
