@@ -1,6 +1,5 @@
 import SwiftUI
 import ARKit
-import AVFoundation
 import WigglerCore
 
 struct ARViewContainer: UIViewRepresentable {
@@ -15,66 +14,27 @@ struct ARViewContainer: UIViewRepresentable {
     func updateUIView(_ uiView: ARSCNView, context: Context) {}
 }
 
-/// Plain camera preview for the AVFoundation path.
-final class PreviewView: UIView {
-    var previewLayer: AVCaptureVideoPreviewLayer? {
-        didSet {
-            oldValue?.removeFromSuperlayer()
-            if let l = previewLayer { layer.addSublayer(l) }
-            setNeedsLayout()
-        }
-    }
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        previewLayer?.frame = bounds
-    }
-}
-
-struct PreviewContainer: UIViewRepresentable {
-    let controller: ARSessionController
-
-    func makeUIView(context: Context) -> PreviewView {
-        let v = PreviewView()
-        v.backgroundColor = .black
-        v.previewLayer = controller.previewLayer
-        return v
-    }
-
-    func updateUIView(_ uiView: PreviewView, context: Context) {}
-}
-
 struct ContentView: View {
     @StateObject private var controller = ARSessionController()
-    @StateObject private var power = PowerMonitor()
 
     var body: some View {
         GeometryReader { geo in
             ZStack {
-                if controller.useARKit {
-                    ARViewContainer(controller: controller)
-                } else {
-                    PreviewContainer(controller: controller)
-                    axisOverlay2D
-                        .allowsHitTesting(false)
-                }
+                ARViewContainer(controller: controller)
 
                 pointsOverlay
                     .allowsHitTesting(false)
-
                 markerOverlay
                     .allowsHitTesting(false)
 
-                // Touch layer: a tap places the marker (controls above it keep their own taps).
+                // A tap places the marker; the controls above keep their own taps.
                 Color.clear
                     .contentShape(Rectangle())
                     .onTapGesture(coordinateSpace: .local) { p in controller.placeMarker(viewPoint: p) }
 
                 VStack {
                     HStack(alignment: .top) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            rpmText
-                            powerText
-                        }
+                        rpmText
                         Spacer()
                         angleText
                     }
@@ -82,8 +42,6 @@ struct ContentView: View {
                     .padding(.top, 56)
                     Spacer()
                     HStack {
-                        arkitSwitch
-                        Spacer()
                         pointCountControl
                         Spacer()
                         recordButton
@@ -96,15 +54,14 @@ struct ContentView: View {
             .onChange(of: geo.size) { _, s in controller.updateViewportSize(s) }
         }
         .ignoresSafeArea()
-        .onAppear { controller.start(); power.start() }
-        .onDisappear { controller.pause(); power.stop() }
+        .onAppear { controller.start() }
+        .onDisappear { controller.pause() }
     }
 
     // MARK: Overlays
 
     private var pointsOverlay: some View {
         Canvas { ctx, _ in
-            guard controller.showPoints else { return }
             for t in controller.output.tracks {
                 let p = controller.viewPoint(imageX: CGFloat(t.x), imageY: CGFloat(t.y))
                 let color: Color
@@ -131,48 +88,7 @@ struct ContentView: View {
         }
     }
 
-    /// Axis line + rotating half-plane, projected with the camera intrinsics (AVFoundation path).
-    private var axisOverlay2D: some View {
-        Canvas { ctx, _ in
-            let o = controller.output
-            guard let axis = o.axis, o.state != .idle else { return }
-            let span = 4.0
-            let n = 48
-            // Axis line, clipped to the part in front of the camera by sampling.
-            var line = Path()
-            var pen = false
-            for i in 0...n {
-                let s = -span + 2 * span * Double(i) / Double(n)
-                if let p = controller.projectToView(axis.origin + axis.direction * s) {
-                    if pen { line.addLine(to: p) } else { line.move(to: p); pen = true }
-                } else {
-                    pen = false
-                }
-            }
-            ctx.stroke(line, with: .color(.cyan.opacity(0.4 + 0.6 * o.axisQuality)), lineWidth: 2)
-
-            guard o.state == .locked, o.angleConfidence > 0.15 else { return }
-            let radius = max(0.03, o.objectRadius) * 1.35
-            let radial = (axis.e1 * cos(o.theta) + axis.e2 * sin(o.theta)) * radius
-            // Half-plane between the axis and its parallel at `radial`, filled piecewise.
-            var quad = Path()
-            var prevA: CGPoint?
-            var prevB: CGPoint?
-            for i in 0...n {
-                let s = -span + 2 * span * Double(i) / Double(n)
-                let a = controller.projectToView(axis.origin + axis.direction * s)
-                let b = controller.projectToView(axis.origin + axis.direction * s + radial)
-                if let a = a, let b = b, let pa = prevA, let pb = prevB {
-                    quad.move(to: pa); quad.addLine(to: pb); quad.addLine(to: b); quad.addLine(to: a); quad.closeSubpath()
-                }
-                prevA = a
-                prevB = b
-            }
-            ctx.fill(quad, with: .color(.orange.opacity(0.35 + 0.5 * o.angleConfidence)))
-        }
-    }
-
-    // MARK: Discreet readouts
+    // MARK: Readouts and controls
 
     private var rpmText: some View {
         let o = controller.output
@@ -186,12 +102,6 @@ struct ContentView: View {
         return Text(o.state == .locked && o.angleConfidence > 0 ? String(format: "%.0f°", o.angleDegrees) : "")
             .font(.caption.monospacedDigit())
             .foregroundStyle(.white.opacity(0.8))
-    }
-
-    private var powerText: some View {
-        Text(power.watts.map { String(format: "%.1f W%@", $0, power.isEstimate ? " ~" : "") } ?? "— W")
-            .font(.caption.monospacedDigit())
-            .foregroundStyle(.white.opacity(0.6))
     }
 
     private var pointCountControl: some View {
@@ -210,18 +120,6 @@ struct ContentView: View {
         .background(.black.opacity(0.35), in: Capsule())
     }
 
-    private var arkitSwitch: some View {
-        Toggle(isOn: $controller.useARKit) {
-            Text("ARKit").font(.caption).foregroundStyle(.white.opacity(0.8))
-        }
-        .toggleStyle(.switch)
-        .tint(.cyan)
-        .scaleEffect(0.75, anchor: .leading)
-        .fixedSize()
-    }
-
-    // MARK: Recording (small, discreet)
-
     private var recordButton: some View {
         Button {
             controller.toggleRecording()
@@ -238,7 +136,7 @@ struct ContentView: View {
         }
         .buttonStyle(.plain)
         .sheet(item: $controller.pendingShare) { item in
-            // Export prompt opened automatically when a recording stops.
+            // Export prompt opened automatically when a recording stops (all parts of the session).
             ShareSheet(items: item.urls)
         }
     }
