@@ -100,23 +100,21 @@ struct ContentView: View {
     }
 
     private var pointCountControl: some View {
-        HStack(spacing: 10) {
-            Button {
+        HStack(spacing: 2) {
+            selectionButton("−", selected: false) {
                 controller.adjustTrackCount(by: -5)
-            } label: {
-                Image(systemName: "minus").frame(width: 36, height: 36).contentShape(Rectangle())
             }
-            Text("\(controller.targetTrackCount) pts").font(.caption.monospacedDigit()).foregroundStyle(
-                .white.opacity(0.8))
-            Button {
+            .accessibilityLabel("Decrease point count")
+            Text("\(controller.targetTrackCount) pts")
+                .font(.caption2.monospaced())
+                .foregroundStyle(.white.opacity(0.8))
+                .padding(.horizontal, 4)
+            selectionButton("+", selected: false) {
                 controller.adjustTrackCount(by: 5)
-            } label: {
-                Image(systemName: "plus").frame(width: 36, height: 36).contentShape(Rectangle())
             }
+            .accessibilityLabel("Increase point count")
         }
-        .buttonStyle(.plain)
-        .foregroundStyle(.white.opacity(0.8))
-        .padding(.horizontal, 6)
+        .padding(3)
         .background(.black.opacity(0.35), in: Capsule())
     }
 
