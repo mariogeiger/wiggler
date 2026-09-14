@@ -35,6 +35,7 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
         recording: false, seconds: 0, megabytes: 0, frames: 0, fileName: "")
     /// Set when a recording stops: the view presents the export sheet for it.
     @Published var pendingShare: ShareItem?
+    @Published var recordingError: String?
 
     let sceneView = ARSCNView(frame: .zero)
 
@@ -43,14 +44,13 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
     private let engine = RotationEngine()
     private let converter = FrameConverter()
     private let recorder = SessionRecorder()
-    private let recordEveryNth = 2
-    private var frameCounter = 0
     /// ARKit delivers frames here; conversion is quick and the ARFrame is released immediately.
     private let frameQueue = DispatchQueue(label: "ch.mariogeiger.wiggler.frames", qos: .userInteractive)
     /// The engine runs here; frames arriving while it is busy are dropped (never queued) so ARKit is never starved.
     private let engineQueue = DispatchQueue(label: "ch.mariogeiger.wiggler.engine", qos: .userInteractive)
     private var engineBusy = false
     private var droppedFrames = 0
+    private var conversionFailures = 0
     private var processedFps = 0.0
     private var lastProcessedTimestamp: Double?
     private let overlay = AxisOverlayNode()
@@ -71,6 +71,7 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
 
     override init() {
         super.init()
+        recorder.onFailure = { [weak self] error in self?.reportRecordingFailure(error) }
         sceneView.delegate = self
         sceneView.session.delegate = self
         sceneView.session.delegateQueue = frameQueue
@@ -162,13 +163,40 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
     }
 
     func toggleRecording() {
-        if recorder.isRecording {
-            recorder.stop()
-            if let url = recorder.url { pendingShare = ShareItem(urls: [url]) }
-        } else {
-            recorder.start()
+        let deviceModel = UIDevice.current.model
+        engineQueue.async { [self] in
+            let stopping = recorder.isRecording
+            if stopping {
+                recorder.stop()
+            } else {
+                recorder.start(
+                    width: FrameConverter.engineWidth, height: FrameConverter.engineHeight,
+                    context: [
+                        "deviceModel": deviceModel,
+                        "harmonicOrders": Self.harmonicOrders,
+                        "posePolicy": "normal and limited(excessiveMotion/insufficientFeatures) accepted",
+                    ])
+                if recorder.isRecording { engine.beginDiagnosticCapture() }
+            }
+            let status = recorder.status(now: lastProcessedTimestamp ?? 0)
+            let shareURL = stopping && status.error == nil ? recorder.url : nil
+            DispatchQueue.main.async { [weak self] in
+                self?.recorderStatus = status
+                self?.recordingError = status.error
+                if let shareURL { self?.pendingShare = ShareItem(urls: [shareURL]) }
+            }
         }
-        recorderStatus = recorder.status(now: 0)
+    }
+
+    private func reportRecordingFailure(_ error: String) {
+        engineQueue.async { [weak self] in
+            guard let self else { return }
+            let status = recorder.status(now: lastProcessedTimestamp ?? 0)
+            DispatchQueue.main.async { [weak self] in
+                self?.recorderStatus = status
+                self?.recordingError = error
+            }
+        }
     }
 
     /// Normalised engine image → normalised view coordinates.
@@ -211,12 +239,15 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
             return
         }
         guard let input = converter.convert(frame, harmonicSignal: signal) else {
+            conversionFailures += 1
             lock.lock()
             engineBusy = false
             lock.unlock()
             return
         }
         let luma8 = converter.lastLuma8
+        let dropped = droppedFrames, failedConversions = conversionFailures
+        let cameraTrackingState = String(describing: frame.camera.trackingState)
         let transform = frame.displayTransform(for: .portrait, viewportSize: size)
         // Nothing below touches `frame` any more.
         engineQueue.async { [self] in
@@ -224,7 +255,8 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
                 processedFps += 0.1 * (1.0 / (input.timestamp - lt) - processedFps)
             }
             lastProcessedTimestamp = input.timestamp
-            let out = engine.process(input)
+            let recording = recorder.isRecording
+            let out = engine.process(input, captureDiagnostics: recording)
             updateHarmonics(input: inputRevision == harmonicRevisionEngine ? input : nil, output: out)
             lock.lock()
             latestOutput = out
@@ -234,13 +266,19 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
             latestDisplayTransform = transform
             engineBusy = false
             lock.unlock()
-            frameCounter += 1
-            if recorder.isRecording && frameCounter % recordEveryNth == 0 {
+            if recording {
                 recorder.append(
-                    input: input, luma8: luma8, output: out,
-                    marker: out.marker.map { CGPoint(x: CGFloat($0.x), y: CGFloat($0.y)) },
-                    roiRadius: out.marker?.radius ?? 0,
-                    droppedFrames: droppedFrames, processedFps: processedFps)
+                    input: input, luma8: luma8, output: out, config: engine.config,
+                    settings: [
+                        "harmonicSignal": harmonics.signal.rawValue,
+                        "harmonicOrder": harmonicOrderEngine as Any? ?? NSNull(),
+                        "harmonicRevision": harmonicRevisionEngine, "inputRevision": inputRevision,
+                        "convertedSignal": signal.rawValue,
+                        "harmonicInputAccepted": inputRevision == harmonicRevisionEngine,
+                        "harmonicTurnProgress": harmonics.turnProgress,
+                        "cameraTrackingState": cameraTrackingState,
+                    ],
+                    droppedFrames: dropped, conversionFailures: failedConversions, processedFps: processedFps)
             }
             let now = Date()
             if now.timeIntervalSince(lastPublish) > 1.0 / 30.0 {

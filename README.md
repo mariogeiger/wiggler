@@ -96,8 +96,40 @@ Chroma comes from the camera's Cb,Cr plane, centered at byte 128 and normalized 
 normalized camera field of view. Non-finite depths, depths at or below 5 cm, and low-confidence samples
 are missing observations, not zeros; absent confidence accepts otherwise valid depths. Each pixel needs
 enough valid angular coverage and a nonsingular fit, or stays transparent. Entire missing frames decay
-the existing fit without adding samples; a changed grid clears it. Depth is disabled on devices without scene-depth support. Recordings remain luma/depth;
-chroma is not added to the `.wig` format.
+the existing fit without adding samples; a changed grid clears it. Depth is disabled on devices without scene-depth support. Recordings include the selected chroma plane
+when it was converted for a processed frame.
+
+## Diagnostic recordings
+
+Record writes one streamed `.wig` file per session, without restarting the running engine. Version 2 saves
+**every processed frame**, not every ARKit frame: busy-frame drops and conversion failures are cumulative
+per-frame counters. Each frame includes the full active `EngineConfig`, harmonic signal/order and selection
+generations, camera tracking state, inputs, outputs (including `axisStable`), and decision diagnostics.
+Diagnostics include stable point IDs, point/depth selection evidence, chord residuals, stability counters,
+axis estimates, and reset/invalidation events. The first captured frame also describes retained evidence
+from before Record was pressed. This is **not a restorable engine snapshot**: earlier images, the KLT pyramid,
+and appearance/harmonic libraries are absent. `tools/replay.py` is a research pipeline, not an exact Swift replay.
+
+All chunk lengths are UInt32 little-endian. A JSON header identifies format, app version/build, OS and an
+executable SHA-256 when available; a source revision is explicitly marked as not embedded. Each frame has
+six chunks: JSON metadata, luma UInt8, depth Float32, confidence UInt8, Cr Float32, Cb Float32. Metadata and
+images are compressed automatically while streaming; there is no separate ZIP file or export-time pass.
+Every nonempty frame chunk starts with a codec byte: raw (0) or raw deflate (1), followed by the payload.
+Raw storage is used only when compression fails or would not reduce size. Absent image planes have empty chunks. Float
+planes are little-endian and row-major; signed chroma preserves the converted input exactly. Dimensions
+are per frame. JSON nonfinite numbers use `NaN`, `+Infinity`, `-Infinity` strings; float planes retain IEEE 754.
+The writer holds at most eight pending frames and waits rather than dropping processed inputs. Compression
+and diagnostics have a cost and may lower capture rate; the recorded timestamps and drop counters expose it.
+Write failures are shown, not silently replaced with empty metadata. Files may be larger than earlier recordings.
+
+`tools/wigreader.py` reads both v1 and v2 and rejects malformed or truncated chunks. For long recordings,
+use `iter_frames(path)` instead of `read(path)`, which loads all frames. Frame metadata includes `config`,
+`settings` and `diagnostics`; optional signed planes are `frame.chroma_red` and `frame.chroma_blue`.
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 uv run --no-project --with numpy python -m unittest discover -s tools/tests
+./tools/test-recording      # Linux + Docker + memcap: actual writer/raw + deflate shims, Python readback, app syntax
+```
 
 ## How it works
 

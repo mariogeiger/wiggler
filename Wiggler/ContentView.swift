@@ -189,6 +189,17 @@ struct ContentView: View {
             // Export prompt opened automatically when a recording stops.
             ShareSheet(items: item.urls)
         }
+        .alert(
+            "Recording failed",
+            isPresented: Binding(
+                get: { controller.recordingError != nil },
+                set: { if !$0 { controller.recordingError = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { controller.recordingError = nil }
+        } message: {
+            Text(controller.recordingError ?? "")
+        }
     }
 }
 

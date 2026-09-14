@@ -1,124 +1,264 @@
 import Foundation
 import WigglerCore
 
-/// Records sampled inputs the engine sees (downscaled luma, LiDAR depth + confidence, intrinsics, pose) plus the
-/// engine's outputs, so a session can be replayed and studied offline.
-///
-/// File format (`.wig`), all integers little-endian:
-///   header: UInt32 length + JSON  {"version":1,"width":480,"height":360,...}
-///   frames: UInt32 len + JSON meta | UInt32 len + deflate(luma UInt8[w*h]) | UInt32 len + deflate(depth Float32[dw*dh])
-///           | UInt32 len + deflate(confidence UInt8[dw*dh])   (len 0 when absent)
+#if canImport(CryptoKit)
+    import CryptoKit
+#endif
+
+/// Streams every processed input and its decision evidence to one file. Public calls belong on the engine queue.
+/// Version 2: length-prefixed JSON header, then metadata and five image chunks per frame.
+/// Each nonempty frame chunk starts with a codec byte (0 raw, 1 raw deflate). Numbers in planes are little-endian.
 final class SessionRecorder {
     private let queue = DispatchQueue(label: "ch.mariogeiger.wiggler.recorder", qos: .utility)
+    private let slots = DispatchSemaphore(value: 8)
+    private let lock = NSLock()
+    private let directory: URL
+    /// Set before starting capture. Called on the writer queue on the first failure.
+    var onFailure: ((String) -> Void)?
+    // Writer queue only.
     private var handle: FileHandle?
+    // Engine queue only.
     private(set) var url: URL?
     private var startTime: Double?
-    private var written: Int64 = 0
-    private var frames = 0
-
-    var isRecording: Bool { handle != nil }
+    private var sequence = 0
+    // Protected by lock.
+    private var snapshot = Status()
 
     struct Status {
-        var recording: Bool
-        var seconds: Double
-        var megabytes: Double
-        var frames: Int
-        var fileName: String
+        var recording = false
+        var seconds = 0.0
+        var megabytes = 0.0
+        var frames = 0
+        var fileName = ""
+        var error: String?
     }
 
+    init(directory: URL = SessionRecorder.documentsDirectory) { self.directory = directory }
+
+    var isRecording: Bool { status(now: 0).recording }
+
     func status(now: Double) -> Status {
-        Status(
-            recording: isRecording, seconds: startTime.map { now - $0 } ?? 0,
-            megabytes: Double(written) / 1_048_576, frames: frames, fileName: url?.lastPathComponent ?? "")
+        lock.lock()
+        defer { lock.unlock() }
+        var result = snapshot
+        result.seconds = startTime.map { max(0, now - $0) } ?? 0
+        return result
     }
 
     static var documentsDirectory: URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
     }
 
-    func start() {
+    static func buildIdentity() -> [String: Any] {
+        let bundle = Bundle.main
+        var result: [String: Any] = [
+            "bundleIdentifier": bundle.bundleIdentifier ?? "unknown",
+            "version": bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") ?? "unknown",
+            "build": bundle.object(forInfoDictionaryKey: "CFBundleVersion") ?? "unknown",
+            "os": ProcessInfo.processInfo.operatingSystemVersionString,
+            "sourceRevision": "not embedded",
+        ]
+        #if canImport(CryptoKit)
+            if let executable = bundle.executableURL,
+                let data = try? Data(contentsOf: executable, options: .mappedIfSafe)
+            {
+                result["executableSHA256"] = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+            }
+        #endif
+        return result
+    }
+
+    func start(width: Int, height: Int, context: [String: Any]) {
         stop()
         url = nil
-        written = 0
-        frames = 0
+        sequence = 0
         startTime = nil
+        lock.lock()
+        snapshot = Status()
+        lock.unlock()
         let f = DateFormatter()
         f.dateFormat = "yyyyMMdd-HHmmss"
-        let sessionName = "wiggler-" + f.string(from: Date())
-        let u = Self.documentsDirectory.appendingPathComponent("\(sessionName).wig")
-        guard FileManager.default.createFile(atPath: u.path, contents: nil),
-            let h = try? FileHandle(forWritingTo: u)
-        else { return }
-        handle = h
-        url = u
+        let sessionName = "wiggler-" + f.string(from: Date()) + "-" + UUID().uuidString
+        let destination = directory.appendingPathComponent("\(sessionName).wig")
         let header: [String: Any] = [
-            "version": 1, "width": FrameConverter.engineWidth, "height": FrameConverter.engineHeight,
-            "session": sessionName,
+            "version": 2, "width": width, "height": height, "session": sessionName,
+            "createdAt": ISO8601DateFormatter().string(from: Date()),
+            "chunks": ["metadata", "luma", "depth", "confidence", "chromaRed", "chromaBlue"],
+            "chunkCodec": "byte tag: 0=raw, 1=raw-deflate; empty=absent",
+            "compression": "automatic per chunk, stored raw only if compression fails or gives no size gain",
+            "planeTypes": [
+                "luma": "uint8", "depth": "float32-le", "confidence": "uint8",
+                "chromaRed": "float32-le", "chromaBlue": "float32-le",
+            ],
+            "capture": "every processed frame; ARKit frames skipped while busy are counted",
+            "initialState": "warm; first diagnostics.before describes the existing engine, not a restorable snapshot",
+            "replayLimitations":
+                "No pre-recording images, KLT pyramid, or appearance/harmonic library snapshot",
+            "nonFiniteNumbers": "NaN, +Infinity, -Infinity strings in JSON; IEEE 754 in float planes",
+            "maximumPendingFrames": 8, "backpressure": "wait; never discard a processed frame",
+            "build": Self.buildIdentity(), "context": context,
         ]
-        writeChunk(try! JSONSerialization.data(withJSONObject: header))
+        queue.sync {
+            do {
+                guard FileManager.default.createFile(atPath: destination.path, contents: nil) else {
+                    throw CocoaError(.fileWriteUnknown)
+                }
+                handle = try FileHandle(forWritingTo: destination)
+                url = destination
+                try writeChunk(Self.jsonData(header))
+                lock.lock()
+                snapshot.recording = true
+                snapshot.fileName = destination.lastPathComponent
+                lock.unlock()
+            } catch { fail(error) }
+        }
     }
 
     func stop() {
         queue.sync {
-            handle?.closeFile()
+            do { try handle?.close() } catch { fail(error) }
             handle = nil
+            lock.lock()
+            snapshot.recording = false
+            lock.unlock()
         }
     }
 
-    /// Called on the frame queue; copies what it needs and returns immediately.
+    /// The eight-frame bound applies backpressure instead of growing memory or silently losing evidence.
     func append(
-        input: FrameInput, luma8: [UInt8], output: EngineOutput, marker: CGPoint?, roiRadius: Float,
-        droppedFrames: Int = 0, processedFps: Double = 0
+        input: FrameInput, luma8: [UInt8], output: EngineOutput, config: EngineConfig,
+        settings: [String: Any], droppedFrames: Int, conversionFailures: Int, processedFps: Double
     ) {
-        guard handle != nil else { return }
+        guard isRecording else { return }
         if startTime == nil { startTime = input.timestamp }
-        let pose = input.cameraToWorld
-        let r = pose.rotation.m, t = pose.translation
+        let index = sequence
+        sequence += 1
+        slots.wait()
+        queue.async { [self] in
+            defer { slots.signal() }
+            guard handle != nil else { return }
+            do {
+                var meta = Self.metadata(input: input, output: output)
+                meta["sequence"] = index
+                meta["config"] = try Self.jsonObject(config)
+                meta["diagnostics"] = try output.diagnostics.map { try Self.jsonObject($0) } ?? NSNull()
+                meta["settings"] = settings
+                meta["droppedFrames"] = droppedFrames
+                meta["conversionFailures"] = conversionFailures
+                meta["processedFps"] = processedFps
+                try Self.validatePlanes(input: input, luma8: luma8)
+                try writeChunk(Self.compress(Self.jsonData(meta)))
+                try writeChunk(Self.compress(Data(luma8)))
+                try writeChunk(Self.compress(Self.floatData(input.depth?.depth ?? [])))
+                try writeChunk(Self.compress(Data(input.depth?.confidence ?? [])))
+                try writeChunk(Self.compress(Self.floatData(input.chromaRed?.pixels ?? [])))
+                try writeChunk(Self.compress(Self.floatData(input.chromaBlue?.pixels ?? [])))
+                lock.lock()
+                snapshot.frames += 1
+                lock.unlock()
+            } catch { fail(error) }
+        }
+    }
+
+    private static func metadata(input: FrameInput, output: EngineOutput) -> [String: Any] {
+        let t = input.cameraToWorld.translation
         var meta: [String: Any] = [
-            "t": input.timestamp,
+            "t": input.timestamp, "width": input.image.width, "height": input.image.height,
             "fx": input.intrinsics.fx, "fy": input.intrinsics.fy, "cx": input.intrinsics.cx, "cy": input.intrinsics.cy,
-            "rotation": r, "translation": [t.x, t.y, t.z], "poseValid": input.poseValid,
+            "rotation": input.cameraToWorld.rotation.m, "translation": [t.x, t.y, t.z], "poseValid": input.poseValid,
             "depthWidth": input.depth?.width ?? 0, "depthHeight": input.depth?.height ?? 0,
-            "state": output.state.rawValue, "theta": output.theta, "angleConfidence": output.angleConfidence,
+            "chromaRedWidth": input.chromaRed?.width ?? 0, "chromaRedHeight": input.chromaRed?.height ?? 0,
+            "chromaBlueWidth": input.chromaBlue?.width ?? 0, "chromaBlueHeight": input.chromaBlue?.height ?? 0,
+            "state": output.state.rawValue, "theta": output.theta, "angleDegrees": output.angleDegrees,
+            "angleConfidence": output.angleConfidence, "axisStable": output.axisStable,
             "axisQuality": output.axisQuality, "rpm": output.rpm, "trackCount": output.trackCount,
-            "inlierCount": output.inlierCount, "processingMillis": output.processingMillis,
-            "roiRadius": roiRadius,
+            "inlierCount": output.inlierCount, "constraintCount": output.constraintCount,
+            "tracks": output.tracks.map {
+                ["x": $0.x, "y": $0.y, "status": String(describing: $0.status)] as [String: Any]
+            },
+            "processingMillis": output.processingMillis, "roiRadius": output.marker?.radius ?? 0,
             "dispersionDeg": output.angleDispersionDegrees, "relocAnalysed": output.relocalizerAnalysed,
             "relocFill": output.relocalizerFill, "relocAge": output.lastRelocalizationAge,
             "periodDeg": output.periodDegrees, "turnDeg": output.turnCoverageDegrees,
-            "objectRadius": output.objectRadius, "droppedFrames": droppedFrames, "processedFps": processedFps,
+            "objectRadius": output.objectRadius, "heightMin": output.heightMin, "heightMax": output.heightMax,
+            "angleUncertaintyDegrees": output.angleUncertaintyDegrees, "message": output.message,
         ]
-        if let m = marker { meta["marker"] = [m.x, m.y] }
+        if let m = output.marker { meta["marker"] = [m.x, m.y] }
         if let a = output.axis {
             meta["axisOrigin"] = [a.origin.x, a.origin.y, a.origin.z]
             meta["axisDirection"] = [a.direction.x, a.direction.y, a.direction.z]
         }
-        let metaData = (try? JSONSerialization.data(withJSONObject: meta)) ?? Data()
-        let lumaData = Data(luma8)
-        let depthData = input.depth.map { d in d.depth.withUnsafeBufferPointer { Data(buffer: $0) } } ?? Data()
-        let confData = input.depth?.confidence.map { Data($0) } ?? Data()
-        queue.async { [self] in
-            guard handle != nil else { return }
-            writeChunk(metaData)
-            writeChunk(Self.compress(lumaData))
-            writeChunk(Self.compress(depthData))
-            writeChunk(Self.compress(confData))
-            frames += 1
+        return meta
+    }
+
+    private static func jsonObject<T: Encodable>(_ value: T) throws -> Any {
+        let encoder = JSONEncoder()
+        encoder.nonConformingFloatEncodingStrategy = .convertToString(
+            positiveInfinity: "+Infinity", negativeInfinity: "-Infinity", nan: "NaN")
+        return try JSONSerialization.jsonObject(with: encoder.encode(value))
+    }
+
+    private static func jsonData(_ value: [String: Any]) throws -> Data {
+        try JSONSerialization.data(withJSONObject: finiteJSON(value), options: [.sortedKeys])
+    }
+
+    private static func finiteJSON(_ value: Any) -> Any {
+        if let array = value as? [Any] { return array.map(finiteJSON) }
+        if let object = value as? [String: Any] { return object.mapValues(finiteJSON) }
+        if let number = value as? NSNumber, !number.doubleValue.isFinite {
+            let x = number.doubleValue
+            return x.isNaN ? "NaN" : (x > 0 ? "+Infinity" : "-Infinity")
+        }
+        return value
+    }
+
+    private static func validatePlanes(input: FrameInput, luma8: [UInt8]) throws {
+        guard input.image.width > 0, input.image.height > 0,
+            luma8.count == input.image.width * input.image.height
+        else { throw CocoaError(.coderInvalidValue) }
+        if let depth = input.depth {
+            guard depth.width > 0, depth.height > 0, depth.depth.count == depth.width * depth.height,
+                depth.confidence == nil || depth.confidence?.count == depth.depth.count
+            else { throw CocoaError(.coderInvalidValue) }
+        }
+        for image in [input.chromaRed, input.chromaBlue].compactMap({ $0 }) {
+            guard image.width > 0, image.height > 0, image.pixels.count == image.width * image.height else {
+                throw CocoaError(.coderInvalidValue)
+            }
         }
     }
 
-    private static func compress(_ d: Data) -> Data {
-        if d.isEmpty { return d }
-        // Raw deflate stream (no zlib header): Python reads it with zlib.decompress(data, -15).
-        return (try? (d as NSData).compressed(using: .zlib) as Data) ?? d
+    private static func floatData(_ values: [Float]) -> Data {
+        values.map { $0.bitPattern.littleEndian }.withUnsafeBufferPointer { Data(buffer: $0) }
     }
 
-    private func writeChunk(_ d: Data) {
-        guard let h = handle else { return }
-        var len = UInt32(d.count).littleEndian
-        h.write(Data(bytes: &len, count: 4))
-        h.write(d)
-        written += Int64(4 + d.count)
+    private static func compress(_ data: Data) -> Data {
+        guard !data.isEmpty else { return data }
+        if let compressed = try? (data as NSData).compressed(using: .zlib) as Data, compressed.count < data.count {
+            return Data([1]) + compressed
+        }
+        return Data([0]) + data
+    }
+
+    private func writeChunk(_ data: Data) throws {
+        guard let handle, let count = UInt32(exactly: data.count) else { throw CocoaError(.fileWriteUnknown) }
+        var length = count.littleEndian
+        try handle.write(contentsOf: Data(bytes: &length, count: 4))
+        try handle.write(contentsOf: data)
+        lock.lock()
+        snapshot.megabytes += Double(4 + data.count) / 1_048_576
+        lock.unlock()
+    }
+
+    private func fail(_ error: Error) {
+        try? handle?.close()
+        handle = nil
+        lock.lock()
+        snapshot.recording = false
+        let firstFailure = snapshot.error == nil
+        if firstFailure { snapshot.error = error.localizedDescription }
+        lock.unlock()
+        if firstFailure { onFailure?(error.localizedDescription) }
     }
 
     static func recordings() -> [URL] {
