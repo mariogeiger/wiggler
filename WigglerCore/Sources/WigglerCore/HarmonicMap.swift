@@ -107,7 +107,11 @@ public struct HarmonicMap {
     /// The inverse normal matrix; nil while singular.
     private func inverseMoments() -> [[Double]]? {
         let t = terms
-        var m = (0..<t).map { i in (0..<t).map { moments[i * t + $0] } + (0..<t).map { i == $0 ? 1.0 : 0 } }
+        var m = (0..<t).map { i -> [Double] in
+            let row = (0..<t).map { moments[i * t + $0] }
+            let identity = (0..<t).map { i == $0 ? 1.0 : 0.0 }
+            return row + identity
+        }
         let tiny = 1e-12 * (0..<t).reduce(0) { $0 + moments[$1 * t + $1] }
         for col in 0..<t {
             var pivot = col
