@@ -44,11 +44,21 @@ assert frames[0].meta["rpm"] == "+Infinity"
 assert "initialContext" in frames[0].meta["diagnostics"]
 assert "initialContext" not in frames[1].meta["diagnostics"]
 count = 0
+state = 123
+noise = np.empty(480 * 360, dtype="u1")
+for pixel in range(noise.size):
+    state = (1664525 * state + 1013904223) & 0xffffffff
+    noise[pixel] = state >> 24
+noise = noise.reshape(360, 480)
 for index, frame in enumerate(wigreader.iter_frames(root / manifest["large"])):
     count += 1
     assert frame.meta["sequence"] == index and frame.t == index / 30
-    assert frame.luma.shape == (360, 480) and np.all(frame.luma == index % 251)
+    assert frame.luma.shape == (360, 480)
+    expected_luma = index % 251 if manifest["compressible"] else noise ^ (index % 251)
+    assert np.all(frame.luma == expected_luma)
     assert frame.depth is None and frame.chroma_red is None and frame.chroma_blue is None
+    assert frame.meta["diagnostics"] is None
+    assert not {"marker", "axisOrigin", "axisDirection"}.intersection(frame.meta)
 assert count == manifest["largeFrames"]
 assert (root / manifest["large"]).stat().st_size == manifest["largeBytes"]
 assert wigreader.read(root / manifest["failed"])[1] == []

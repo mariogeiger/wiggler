@@ -33,6 +33,8 @@ for index in 0..<5 { _ = engine.process(frame(index)) }
 recorder.start(width: 48, height: 36, context: ["test": "warm recording"])
 try check(recorder.isRecording, "start failed")
 let firstURL = recorder.url!
+let schemaEngine = RotationEngine()
+try checkMetadataEncoding(input: frame(1), diagnosticOutput: schemaEngine.process(frame(1), captureDiagnostics: true))
 for index in 5..<29 {
     let input = frame(index)
     engine.config.targetTrackCount = index < 17 ? 60 : 65
@@ -40,10 +42,9 @@ for index in 5..<29 {
     output.rpm = index == 5 ? .infinity : Double(index)
     recorder.append(
         input: input, luma8: smallPixels, output: output, config: engine.config,
-        settings: [
-            "harmonicSignal": index % 3 == 1 ? "chromaRed" : (index % 3 == 2 ? "chromaBlue" : "luma"),
-            "harmonicOrder": index < 17 ? NSNull() as Any : 2 as Any,
-        ],
+        settings: RecordingSettings(
+            harmonicSignal: index % 3 == 1 ? "chromaRed" : (index % 3 == 2 ? "chromaBlue" : "luma"),
+            harmonicOrder: index < 17 ? nil : 2),
         droppedFrames: index, conversionFailures: 2, processedFps: 20)
 }
 // Starting again must drain the old session and never reuse its path, even within one second.
@@ -51,8 +52,19 @@ recorder.start(width: 480, height: 360, context: ["test": "single large file"])
 let largeURL = recorder.url!
 try check(largeURL != firstURL, "start reused a file path")
 let largeCount = 1600
+let compressible = CommandLine.arguments.contains("--compressible")
+var randomState: UInt32 = 123
+let noise: [UInt8] = (0..<(480 * 360)).map { _ in
+    randomState = 1664525 &* randomState &+ 1013904223
+    return UInt8(randomState >> 24)
+}
+try check(RecordingChunkCodec.encode(Data()).isEmpty, "empty plane acquired a codec tag")
+try check(RecordingChunkCodec.encode(Data(noise)).first == 0, "incompressible plane did not use raw storage")
+try check(
+    RecordingChunkCodec.encode(Data(repeating: 0, count: noise.count)).first == 1, "repeated plane did not deflate")
 for index in 0..<largeCount {
-    let pixels = [UInt8](repeating: UInt8(index % 251), count: 480 * 360)
+    let value = UInt8(index % 251)
+    let pixels = compressible ? [UInt8](repeating: value, count: noise.count) : noise.map { $0 ^ value }
     let largeImage = pixels.withUnsafeBufferPointer {
         GrayImage(width: 480, height: 360, luma8: $0.baseAddress!, bytesPerRow: 480)
     }
@@ -60,20 +72,18 @@ for index in 0..<largeCount {
         image: largeImage, intrinsics: intrinsics, cameraToWorld: .identity, poseValid: false,
         depth: nil, timestamp: Double(index) / 30)
     recorder.append(
-        input: input, luma8: pixels, output: EngineOutput(), config: EngineConfig(), settings: [:],
+        input: input, luma8: pixels, output: EngineOutput(), config: EngineConfig(), settings: RecordingSettings(),
         droppedFrames: 0, conversionFailures: 0, processedFps: 30)
 }
 recorder.stop()
 let status = recorder.status(now: Double(largeCount - 1) / 30)
 try check(status.error == nil && !status.recording && status.frames == largeCount, "stop failed to drain")
 let size = try FileManager.default.attributesOfItem(atPath: largeURL.path)[.size] as! NSNumber
-#if os(Linux)
-    if ProcessInfo.processInfo.environment["WIG_TEST_COMPRESSION"] == "deflate" {
-        try check(size.intValue < 5 * 1024 * 1024, "compressible session did not shrink")
-    } else {
-        try check(size.intValue > 250 * 1024 * 1024, "raw fallback did not cross old split threshold")
-    }
-#endif
+if compressible {
+    try check(size.intValue < 5 * 1024 * 1024, "compressible session did not shrink")
+} else {
+    try check(size.intValue > 250 * 1024 * 1024, "raw fallback did not cross old split threshold")
+}
 try check(status.megabytes == size.doubleValue / 1_048_576, "size counter is wrong")
 try check(status.seconds == Double(largeCount - 1) / 30, "duration is wrong")
 recorder.stop()
@@ -89,7 +99,7 @@ recorder.onFailure = { _ in failureReported.signal() }
 recorder.start(width: 48, height: 36, context: [:])
 let failedURL = recorder.url!
 recorder.append(
-    input: frame(0), luma8: [], output: EngineOutput(), config: EngineConfig(), settings: [:],
+    input: frame(0), luma8: [], output: EngineOutput(), config: EngineConfig(), settings: RecordingSettings(),
     droppedFrames: 0, conversionFailures: 0, processedFps: 20)
 try check(failureReported.wait(timeout: .now() + 5) == .success, "failure was not reported without another frame")
 recorder.stop()
@@ -99,7 +109,7 @@ try check(recorder.isRecording && recorder.status(now: 0).error == nil, "could n
 recorder.stop()
 let manifest: [String: Any] = [
     "warm": firstURL.lastPathComponent, "large": largeURL.lastPathComponent,
-    "failed": failedURL.lastPathComponent, "largeFrames": largeCount, "largeBytes": size,
+    "failed": failedURL.lastPathComponent, "largeFrames": largeCount, "largeBytes": size, "compressible": compressible,
 ]
 try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
     .write(to: directory.appendingPathComponent("manifest.json"))

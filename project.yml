@@ -16,6 +16,7 @@ targets:
       - path: Wiggler
     dependencies:
       - package: WigglerCore
+      - sdk: libz.tbd
     info:
       path: Wiggler/Info.plist
       properties:

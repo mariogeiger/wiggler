@@ -127,7 +127,7 @@ final class SessionRecorder {
     /// The eight-frame bound applies backpressure instead of growing memory or silently losing evidence.
     func append(
         input: FrameInput, luma8: [UInt8], output: EngineOutput, config: EngineConfig,
-        settings: [String: Any], droppedFrames: Int, conversionFailures: Int, processedFps: Double
+        settings: RecordingSettings, droppedFrames: Int, conversionFailures: Int, processedFps: Double
     ) {
         guard isRecording else { return }
         if startTime == nil { startTime = input.timestamp }
@@ -138,64 +138,24 @@ final class SessionRecorder {
             defer { slots.signal() }
             guard handle != nil else { return }
             do {
-                var meta = Self.metadata(input: input, output: output)
-                meta["sequence"] = index
-                meta["config"] = try Self.jsonObject(config)
-                meta["diagnostics"] = try output.diagnostics.map { try Self.jsonObject($0) } ?? NSNull()
-                meta["settings"] = settings
-                meta["droppedFrames"] = droppedFrames
-                meta["conversionFailures"] = conversionFailures
-                meta["processedFps"] = processedFps
+                let meta = RecordingFrameMetadata(
+                    input: input, output: output, config: config, settings: settings, sequence: index,
+                    droppedFrames: droppedFrames, conversionFailures: conversionFailures, processedFps: processedFps)
+                let encoder = JSONEncoder()
+                encoder.nonConformingFloatEncodingStrategy = .convertToString(
+                    positiveInfinity: "+Infinity", negativeInfinity: "-Infinity", nan: "NaN")
                 try Self.validatePlanes(input: input, luma8: luma8)
-                try writeChunk(Self.compress(Self.jsonData(meta)))
-                try writeChunk(Self.compress(Data(luma8)))
-                try writeChunk(Self.compress(Self.floatData(input.depth?.depth ?? [])))
-                try writeChunk(Self.compress(Data(input.depth?.confidence ?? [])))
-                try writeChunk(Self.compress(Self.floatData(input.chromaRed?.pixels ?? [])))
-                try writeChunk(Self.compress(Self.floatData(input.chromaBlue?.pixels ?? [])))
+                try writeChunk(RecordingChunkCodec.encode(encoder.encode(meta)))
+                try writeChunk(RecordingChunkCodec.encode(Data(luma8)))
+                try writeChunk(RecordingChunkCodec.encode(Self.floatData(input.depth?.depth ?? [])))
+                try writeChunk(RecordingChunkCodec.encode(Data(input.depth?.confidence ?? [])))
+                try writeChunk(RecordingChunkCodec.encode(Self.floatData(input.chromaRed?.pixels ?? [])))
+                try writeChunk(RecordingChunkCodec.encode(Self.floatData(input.chromaBlue?.pixels ?? [])))
                 lock.lock()
                 snapshot.frames += 1
                 lock.unlock()
             } catch { fail(error) }
         }
-    }
-
-    private static func metadata(input: FrameInput, output: EngineOutput) -> [String: Any] {
-        let t = input.cameraToWorld.translation
-        var meta: [String: Any] = [
-            "t": input.timestamp, "width": input.image.width, "height": input.image.height,
-            "fx": input.intrinsics.fx, "fy": input.intrinsics.fy, "cx": input.intrinsics.cx, "cy": input.intrinsics.cy,
-            "rotation": input.cameraToWorld.rotation.m, "translation": [t.x, t.y, t.z], "poseValid": input.poseValid,
-            "depthWidth": input.depth?.width ?? 0, "depthHeight": input.depth?.height ?? 0,
-            "chromaRedWidth": input.chromaRed?.width ?? 0, "chromaRedHeight": input.chromaRed?.height ?? 0,
-            "chromaBlueWidth": input.chromaBlue?.width ?? 0, "chromaBlueHeight": input.chromaBlue?.height ?? 0,
-            "state": output.state.rawValue, "theta": output.theta, "angleDegrees": output.angleDegrees,
-            "angleConfidence": output.angleConfidence, "axisStable": output.axisStable,
-            "axisQuality": output.axisQuality, "rpm": output.rpm, "trackCount": output.trackCount,
-            "inlierCount": output.inlierCount, "constraintCount": output.constraintCount,
-            "tracks": output.tracks.map {
-                ["x": $0.x, "y": $0.y, "status": String(describing: $0.status)] as [String: Any]
-            },
-            "processingMillis": output.processingMillis, "roiRadius": output.marker?.radius ?? 0,
-            "dispersionDeg": output.angleDispersionDegrees, "relocAnalysed": output.relocalizerAnalysed,
-            "relocFill": output.relocalizerFill, "relocAge": output.lastRelocalizationAge,
-            "periodDeg": output.periodDegrees, "turnDeg": output.turnCoverageDegrees,
-            "objectRadius": output.objectRadius, "heightMin": output.heightMin, "heightMax": output.heightMax,
-            "angleUncertaintyDegrees": output.angleUncertaintyDegrees, "message": output.message,
-        ]
-        if let m = output.marker { meta["marker"] = [m.x, m.y] }
-        if let a = output.axis {
-            meta["axisOrigin"] = [a.origin.x, a.origin.y, a.origin.z]
-            meta["axisDirection"] = [a.direction.x, a.direction.y, a.direction.z]
-        }
-        return meta
-    }
-
-    private static func jsonObject<T: Encodable>(_ value: T) throws -> Any {
-        let encoder = JSONEncoder()
-        encoder.nonConformingFloatEncodingStrategy = .convertToString(
-            positiveInfinity: "+Infinity", negativeInfinity: "-Infinity", nan: "NaN")
-        return try JSONSerialization.jsonObject(with: encoder.encode(value))
     }
 
     private static func jsonData(_ value: [String: Any]) throws -> Data {
@@ -230,14 +190,6 @@ final class SessionRecorder {
 
     private static func floatData(_ values: [Float]) -> Data {
         values.map { $0.bitPattern.littleEndian }.withUnsafeBufferPointer { Data(buffer: $0) }
-    }
-
-    private static func compress(_ data: Data) -> Data {
-        guard !data.isEmpty else { return data }
-        if let compressed = try? (data as NSData).compressed(using: .zlib) as Data, compressed.count < data.count {
-            return Data([1]) + compressed
-        }
-        return Data([0]) + data
     }
 
     private func writeChunk(_ data: Data) throws {

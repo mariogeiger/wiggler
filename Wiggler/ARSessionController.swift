@@ -269,15 +269,12 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
             if recording {
                 recorder.append(
                     input: input, luma8: luma8, output: out, config: engine.config,
-                    settings: [
-                        "harmonicSignal": harmonics.signal.rawValue,
-                        "harmonicOrder": harmonicOrderEngine as Any? ?? NSNull(),
-                        "harmonicRevision": harmonicRevisionEngine, "inputRevision": inputRevision,
-                        "convertedSignal": signal.rawValue,
-                        "harmonicInputAccepted": inputRevision == harmonicRevisionEngine,
-                        "harmonicTurnProgress": harmonics.turnProgress,
-                        "cameraTrackingState": cameraTrackingState,
-                    ],
+                    settings: RecordingSettings(
+                        harmonicSignal: harmonics.signal.rawValue, harmonicOrder: harmonicOrderEngine,
+                        harmonicRevision: harmonicRevisionEngine, inputRevision: inputRevision,
+                        convertedSignal: signal.rawValue,
+                        harmonicInputAccepted: inputRevision == harmonicRevisionEngine,
+                        harmonicTurnProgress: harmonics.turnProgress, cameraTrackingState: cameraTrackingState),
                     droppedFrames: dropped, conversionFailures: failedConversions, processedFps: processedFps)
             }
             let now = Date()

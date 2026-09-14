@@ -14,8 +14,11 @@
 		A100000000000000000000A8 /* HarmonicOverlayNode.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000F8 /* HarmonicOverlayNode.swift */; };
 		A100000000000000000000A5 /* FrameConverter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000F5 /* FrameConverter.swift */; };
 		A100000000000000000000A7 /* SessionRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000F6 /* SessionRecorder.swift */; };
+		A100000000000000000000AB /* RecordingFrameMetadata.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000FB /* RecordingFrameMetadata.swift */; };
+		A100000000000000000000AC /* RecordingChunkCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000FC /* RecordingChunkCodec.swift */; };
 		A100000000000000000000AA /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000FA /* Assets.xcassets */; };
 		A100000000000000000000A6 /* WigglerCore in Frameworks */ = {isa = PBXBuildFile; productRef = A100000000000000000000D1 /* WigglerCore */; };
+		A100000000000000000000AD /* libz.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = A100000000000000000000FD /* libz.tbd */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -27,8 +30,11 @@
 		A100000000000000000000F8 /* HarmonicOverlayNode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HarmonicOverlayNode.swift; sourceTree = "<group>"; };
 		A100000000000000000000F5 /* FrameConverter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameConverter.swift; sourceTree = "<group>"; };
 		A100000000000000000000F6 /* SessionRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionRecorder.swift; sourceTree = "<group>"; };
+		A100000000000000000000FB /* RecordingFrameMetadata.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingFrameMetadata.swift; sourceTree = "<group>"; };
+		A100000000000000000000FC /* RecordingChunkCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingChunkCodec.swift; sourceTree = "<group>"; };
 		A100000000000000000000F7 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A100000000000000000000FA /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A100000000000000000000FD /* libz.tbd */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.text-based-dylib-definition; name = libz.tbd; path = usr/lib/libz.tbd; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -37,6 +43,7 @@
 			buildActionMask = 2147483647;
 			files = (
 		A100000000000000000000A6 /* WigglerCore in Frameworks */,
+				A100000000000000000000AD /* libz.tbd in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -48,6 +55,7 @@
 			children = (
 				A100000000000000000000C1 /* Wiggler */,
 				A100000000000000000000C3 /* Packages */,
+				A100000000000000000000FD /* libz.tbd */,
 				A100000000000000000000C2 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -62,6 +70,8 @@
 				A100000000000000000000F8 /* HarmonicOverlayNode.swift */,
 				A100000000000000000000F5 /* FrameConverter.swift */,
 				A100000000000000000000F6 /* SessionRecorder.swift */,
+				A100000000000000000000FB /* RecordingFrameMetadata.swift */,
+				A100000000000000000000FC /* RecordingChunkCodec.swift */,
 				A100000000000000000000F7 /* Info.plist */,
 				A100000000000000000000FA /* Assets.xcassets */,
 			);
@@ -165,6 +175,8 @@
 				A100000000000000000000A8 /* HarmonicOverlayNode.swift in Sources */,
 				A100000000000000000000A5 /* FrameConverter.swift in Sources */,
 				A100000000000000000000A7 /* SessionRecorder.swift in Sources */,
+				A100000000000000000000AB /* RecordingFrameMetadata.swift in Sources */,
+				A100000000000000000000AC /* RecordingChunkCodec.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
