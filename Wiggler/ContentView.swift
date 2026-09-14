@@ -64,13 +64,10 @@ struct ContentView: View {
                 markerOverlay
                     .allowsHitTesting(false)
 
-                // Touch layer: tap or drag to (re)place the marker.
+                // Touch layer: a tap places the marker (controls above it keep their own taps).
                 Color.clear
                     .contentShape(Rectangle())
-                    .gesture(
-                        DragGesture(minimumDistance: 0, coordinateSpace: .local)
-                            .onEnded { v in controller.placeMarker(viewPoint: v.location) }
-                    )
+                    .onTapGesture(coordinateSpace: .local) { p in controller.placeMarker(viewPoint: p) }
 
                 VStack {
                     HStack(alignment: .top) {
@@ -200,11 +197,11 @@ struct ContentView: View {
     private var pointCountControl: some View {
         HStack(spacing: 10) {
             Button { controller.adjustTrackCount(by: -20) } label: {
-                Image(systemName: "minus").frame(width: 28, height: 28)
+                Image(systemName: "minus").frame(width: 36, height: 36).contentShape(Rectangle())
             }
             Text("\(controller.targetTrackCount) pts").font(.caption.monospacedDigit()).foregroundStyle(.white.opacity(0.8))
             Button { controller.adjustTrackCount(by: 20) } label: {
-                Image(systemName: "plus").frame(width: 28, height: 28)
+                Image(systemName: "plus").frame(width: 36, height: 36).contentShape(Rectangle())
             }
         }
         .buttonStyle(.plain)
