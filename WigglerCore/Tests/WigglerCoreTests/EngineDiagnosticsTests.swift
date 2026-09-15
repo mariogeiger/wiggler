@@ -30,7 +30,7 @@ final class EngineDiagnosticsTests: XCTestCase {
         var sawFreshChords = false
         var sawEstimate = false
         var sawCameraReset = false
-        var sawGeometryInvalidation = false
+        var sawUnhealthyGeometry = false
         var previous: EngineDiagnostics?
         var highestAllocatedID = 0
         for frame in 0..<310 {
@@ -91,11 +91,7 @@ final class EngineDiagnosticsTests: XCTestCase {
                 || diagnostics.events.contains {
                     $0.action == "resetMeasurement" && $0.cause == "cameraMotionVeto"
                 }
-            sawGeometryInvalidation =
-                sawGeometryInvalidation
-                || diagnostics.events.contains {
-                    $0.action == "invalidateStability" && $0.cause == "geometryUnhealthy"
-                }
+            sawUnhealthyGeometry = sawUnhealthyGeometry || diagnostics.geometry?.healthy == false
             if frame == 300 {
                 XCTAssertTrue(diagnostics.cameraMotion?.vetoes.contains("invalidPose") == true)
             }
@@ -118,7 +114,7 @@ final class EngineDiagnosticsTests: XCTestCase {
         XCTAssertTrue(sawFreshChords)
         XCTAssertTrue(sawEstimate)
         XCTAssertTrue(sawCameraReset)
-        XCTAssertTrue(sawGeometryInvalidation)
+        XCTAssertTrue(sawUnhealthyGeometry)
     }
 
     func testColdIdleAndInvalidFrameIntervalDiagnostics() throws {

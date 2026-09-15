@@ -68,9 +68,10 @@ pre-commit run --all-files
    points. When everything stops, existing tracks are preserved.
    If another region becomes active while the first stops, calibration restarts on the new region.
 3. Rotate the object. In the calibrating state, the app collects 3D chords until it finds a well-conditioned
-   axis, then waits for a full turn. The axis is red while uncertain and green after fresh, consistent
-   estimates confirm it. The orange ray rotates with the object when its angle is reliable. The axis is
-   drawn above the harmonic map; only the ray is hidden in that mode.
+   axis, then waits for a full turn. The axis is green when fresh, consistent estimates have confirmed it and
+   the angle is being measured; it is red while calibrating, while a contradicting estimate stands, or while
+   an occluder hides the points (green again on the first healthy frame). The orange ray rotates with the
+   object when its angle is reliable. The axis is drawn above the harmonic map; only the ray is hidden in that mode.
    Moving the phone or losing its pose restarts calibration; the last axis stays visible in red meanwhile.
    A displaced object is recognised when the axis estimated from the last 1.5 s of chords alone persistently
    contradicts the current one (single chords carry ~1 cm of LiDAR noise, so no per-chord test can): the old

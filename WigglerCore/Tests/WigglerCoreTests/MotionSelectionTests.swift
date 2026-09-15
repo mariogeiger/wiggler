@@ -85,6 +85,33 @@ final class MotionSelectionTests: XCTestCase {
         }
     }
 
+    /// A locked body that stops and resumes slowly: its rim passes the speed threshold long before its inner
+    /// points do. Tracks the angle tracker vouches for must survive, or the depth history is lost for nothing.
+    func testSlowResumeKeepsRotationConsistentTracks() {
+        let scene = SyntheticScene()
+        var rng = LCG(seed: 37)
+        let engine = RotationEngine()
+        var theta = 0.0
+        var countAtPause = 0
+        var minimumWhileResuming = Int.max
+        for f in 0..<620 {
+            if f < 400 { theta += 0.04 } else if f >= 490 { theta += 0.0017 }  // rim ≈ 8 px/s, median point ≈ 6
+            var input = scene.render(theta: theta, depthNoise: 0, rng: &rng)
+            input.timestamp = Double(f) / 60
+            let output = engine.process(input)
+            if f == 399 { XCTAssertTrue(output.axisStable, "did not lock before the pause") }
+            if f == 489 {
+                countAtPause = output.trackCount
+                XCTAssertGreaterThan(countAtPause, 50)
+            }
+            if f >= 490 {
+                XCTAssertEqual(output.state, .locked)
+                minimumWhileResuming = min(minimumWhileResuming, output.trackCount)
+            }
+        }
+        XCTAssertGreaterThanOrEqual(minimumWhileResuming, countAtPause - 5, "tracks were dropped for being slow")
+    }
+
     func testMovingCameraAndMissingPoseDoNotActivatePoints() {
         let scene = SyntheticScene()
         var rng = LCG(seed: 35)

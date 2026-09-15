@@ -195,7 +195,10 @@ public struct MotionLocator {
 
     /// Existing moving tracks keep their history. Vacancies and static tracks go to the fastest measured
     /// corners in the region. When everything stops, the existing tracks remain; no static corner is activated.
-    func selected(around marker: Marker, retaining: Set<Int>, limit: Int) -> [Point] {
+    /// `vouched` tracks — those the engine finds consistent with the measured rotation — are kept whatever
+    /// their speed: a rigid rotation resuming slowly moves its inner points below any speed threshold long
+    /// after its rim has started, and dropping them would throw away their depth history for nothing.
+    func selected(around marker: Marker, retaining: Set<Int>, vouched: Set<Int> = [], limit: Int) -> [Point] {
         let r2 = marker.radius * marker.radius * 1.3 * 1.3
         let nearby = points.filter {
             let dx = $0.x - marker.x, dy = $0.y - marker.y
@@ -203,13 +206,16 @@ public struct MotionLocator {
         }
         func moving(_ p: Point) -> Bool { motionValid && p.speed > movingSpeed && p.duration >= 0.1 }
         func rank(_ p: Point) -> Int {
-            if retaining.contains(p.id) && (!motionValid || p.stillFor < 0.5) { return 2 }
+            if vouched.contains(p.id) || (retaining.contains(p.id) && (!motionValid || p.stillFor < 0.5)) {
+                return 2
+            }
             return moving(p) ? 1 : 0
         }
         let hasMotion = nearby.filter { moving($0) }.count >= minMoving
         return Array(
             nearby.filter {
-                moving($0) || (retaining.contains($0.id) && (!hasMotion || $0.stillFor < 0.5))
+                vouched.contains($0.id) || moving($0)
+                    || (retaining.contains($0.id) && (!hasMotion || $0.stillFor < 0.5))
             }.sorted {
                 let a = rank($0), b = rank($1)
                 if a != b { return a > b }

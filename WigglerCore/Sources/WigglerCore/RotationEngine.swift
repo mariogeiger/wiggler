@@ -163,8 +163,12 @@ public final class RotationEngine {
             return finishDiagnostics(out)
         }
 
-        // 1. Reuse the motion search's correspondences; each corner is tracked only once per frame.
-        let selected = locator.selected(around: marker, retaining: tracks.ids, limit: config.targetTrackCount)
+        // 1. Reuse the motion search's correspondences; each corner is tracked only once per frame. Once an axis
+        //    exists, the angle tracker knows which tracks belong to the rotating body better than any speed test.
+        let retained = tracks.ids
+        let vouched: Set<Int> = axis == nil ? [] : retained.filter { angle.isConsistent(id: $0) }
+        let selected = locator.selected(
+            around: marker, retaining: retained, vouched: vouched, limit: config.targetTrackCount)
         diagnostics?.value.selectedTrackIDs = selected.map { $0.id }
         if !locator.motionValid {
             restartCalibration(cause: "cameraMotionVeto")
@@ -293,11 +297,6 @@ public final class RotationEngine {
                 }
             }
         }
-        if !geometryHealthy || !locator.motionValid {
-            if !geometryHealthy { recordEvent(action: "invalidateStability", cause: "geometryUnhealthy") }
-            if !locator.motionValid { recordEvent(action: "invalidateStability", cause: "cameraMotionVeto") }
-            stability.invalidate()
-        }
 
         // 6. State transitions and relocalisation.
         switch state {
@@ -337,7 +336,10 @@ public final class RotationEngine {
         out.state = state
         out.marker = marker
         out.axis = axis ?? displayedAxis
-        out.axisStable = axis != nil && state == .locked && stability.isStable(required: config.lockedDriftFrames)
+        // Confirmed axis and a healthy measurement now. An occluder that hides the points for a moment does not
+        // question the axis: the flag drops while the angle is held and returns with the first healthy frame.
+        out.axisStable =
+            axis != nil && state == .locked && geometryHealthy && stability.isStable(required: config.lockedDriftFrames)
         out.angleMeasured = angleOk
         out.axisGeneration = axisGeneration
         out.theta = angle.theta
