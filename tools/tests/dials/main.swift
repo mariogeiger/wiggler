@@ -14,13 +14,13 @@ private func check(_ scale: RotationDialScale, _ value: Double, x: Double, y: Do
 for turn in -3...3 {
     let offset = Double(turn) * 360
     check(.angle, offset, x: 0, y: -1)
-    check(.angle, offset + 90, x: 1, y: 0)
+    check(.angle, offset + 90, x: -1, y: 0)
     check(.angle, offset + 180, x: 0, y: 1)
-    check(.angle, offset + 270, x: -1, y: 0)
+    check(.angle, offset + 270, x: 1, y: 0)
 }
 check(.rpm, 0, x: 0, y: -1)
-check(.rpm, 50, x: 1, y: 0)
-check(.rpm, -50, x: -1, y: 0)
+check(.rpm, 50, x: -1, y: 0)
+check(.rpm, -50, x: 1, y: 0)
 check(.rpm, 100, x: 0, y: 1)
 check(.rpm, -100, x: 0, y: 1)
 for speed in [101.0, 200, 1_000, Double.greatestFiniteMagnitude] {
@@ -29,6 +29,8 @@ for speed in [101.0, 200, 1_000, Double.greatestFiniteMagnitude] {
 }
 
 for scale in [RotationDialScale.angle, .rpm] {
+    precondition(scale.needleDirection(for: nil) == nil, "Unavailable reading must not appear as zero")
+    checks += 1
     for value in [Double.nan, .infinity, -.infinity] {
         precondition(scale.needleDirection(for: value) == nil, "Non-finite reading must not appear as zero")
         checks += 1

@@ -29,6 +29,11 @@ struct ContentView: View {
                     controls
                         .padding(.top, safeArea.safeAreaInsets.top + 4)
                 }
+                .overlay(alignment: .topTrailing) {
+                    measurementDials
+                        .padding(.top, safeArea.safeAreaInsets.top + 44)
+                        .padding(.trailing, 8)
+                }
                 .onAppear { controller.updateViewportSize(viewport.size) }
                 .onChange(of: viewport.size) { _, size in controller.updateViewportSize(size) }
             }
@@ -50,9 +55,6 @@ struct ContentView: View {
                 }
                 GridRow {
                     harmonicSignalControl.fixedSize()
-                    measurementDials
-                        .fixedSize()
-                        .frame(maxWidth: .infinity, alignment: .trailing)
                 }
                 GridRow {
                     pointCountControl.fixedSize()
@@ -85,19 +87,12 @@ struct ContentView: View {
 
     private var measurementDials: some View {
         let output = controller.output
+        let hasMeasurement = output.state == .locked && output.angleConfidence > 0
         return HStack(spacing: 8) {
-            if output.state == .locked, output.angleConfidence > 0 {
-                RotationDial(scale: .angle, value: output.angleDegrees)
-                RotationDial(scale: .rpm, value: output.rpm)
-                if controller.harmonicOrder != nil, controller.harmonicProgress < 1 {
-                    Text("\(Int(controller.harmonicProgress * 100)) %")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.white.opacity(0.8))
-                        .lineLimit(1)
-                }
-            }
+            RotationDial(scale: .angle, value: hasMeasurement ? output.angleDegrees : nil)
+            RotationDial(scale: .rpm, value: hasMeasurement ? output.rpm : nil)
         }
-        .frame(minHeight: 34)
+        .fixedSize()
     }
 
     private var pointCountControl: some View {

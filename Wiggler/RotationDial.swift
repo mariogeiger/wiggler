@@ -2,14 +2,20 @@ import SwiftUI
 
 struct RotationDial: View {
     let scale: RotationDialScale
-    let value: Double
+    let value: Double?
 
     private var tint: Color { scale == .angle ? .orange : .cyan }
+
+    private var accessibleReading: String {
+        guard let value, value.isFinite else { return "Unavailable" }
+        return scale == .angle
+            ? String(format: "%.0f degrees", -value)
+            : String(format: "%+.0f revolutions per minute", -value)
+    }
 
     var body: some View {
         let direction = scale.needleDirection(for: value)
         Canvas { context, size in
-            guard let direction else { return }
             let center = CGPoint(x: size.width / 2, y: size.height / 2)
             let radius = min(size.width, size.height) / 2 - 1
             let face = Path(
@@ -27,6 +33,7 @@ struct RotationDial: View {
                     zero, with: .color(.white.opacity(0.9)), style: StrokeStyle(lineWidth: 2, lineCap: .round))
             }
 
+            guard let direction else { return }
             var needle = Path()
             needle.move(to: center)
             needle.addLine(
@@ -41,17 +48,12 @@ struct RotationDial: View {
         .frame(width: 34, height: 34)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(scale == .angle ? "Angle" : "Rotation speed")
-        .accessibilityValue(
-            scale == .angle
-                ? String(format: "%.0f degrees", value)
-                : String(format: "%+.0f revolutions per minute", value)
-        )
+        .accessibilityValue(accessibleReading)
         .accessibilityHint(
             scale == .angle
                 ? "Zero at the top; one full turn is 360 degrees."
                 : "Zero at the top; positive clockwise, negative counterclockwise. The needle stops at 100 rpm at the bottom."
         )
-        .accessibilityHidden(direction == nil)
         .allowsHitTesting(false)
     }
 }

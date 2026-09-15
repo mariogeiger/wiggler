@@ -88,13 +88,14 @@ yellow = no depth, white = new.
 
 Controls sit in two columns just below the top safe area (below the Dynamic Island on supported iPhones).
 The left column has harmonic-order buttons, harmonic-input buttons, then point-count buttons on three rows.
-The right column has Record, with elapsed seconds while recording. Below it, two small dials replace numeric
-angle and rpm readouts: orange for the angle (one turn, zero at noon), cyan for speed (a white noon mark is zero).
-Positive rpm moves clockwise and negative rpm counterclockwise; ±100 rpm is six o'clock. Speed saturates there
-beyond ±100 rpm rather than wrapping back to zero. The faces have no text; VoiceOver retains numeric readings.
-Harmonic progress appears beside the dials while accumulating. Measurements stay hidden until the angle is
-available. Controls and dials keep their intrinsic sizes; outer margins give way when they need the width.
-The camera and AR overlays remain full-screen.
+The right column has Record, with elapsed seconds while recording. Below it, two small dials show the angle
+(orange, one turn, zero at noon) and speed (cyan, with a white noon mark at zero). Both displays reverse the
+engine's sign; engine measurements and recordings are unchanged. Displayed positive rpm moves clockwise and
+negative rpm counterclockwise; ±100 rpm is six o'clock. Speed saturates there rather than wrapping back to zero.
+The two faces stay visible at fixed top-right positions, independently of control sizes and tracking state;
+only their needles disappear when measurements are unavailable. No text or percentage appears beside them.
+VoiceOver retains the signed numeric readings and reports unavailable measurements. Controls keep their
+intrinsic sizes; outer margins give way when they need the width. The camera and AR overlays remain full-screen.
 
 `./tools/test-dials` checks the dial scales, app Swift syntax, and checked-in Xcode source membership on Linux
 with Docker and `memcap`. It does not replace an iOS build or a visual check on the phone.

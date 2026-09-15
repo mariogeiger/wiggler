@@ -1,12 +1,12 @@
 import Foundation
 
-/// Clock-face coordinates: zero at noon, positive values clockwise.
+/// Clock-face coordinates for engine readings: zero at noon, positive values counterclockwise.
 enum RotationDialScale {
     case angle
     case rpm
 
-    func needleDirection(for value: Double) -> CGPoint? {
-        guard value.isFinite else { return nil }
+    func needleDirection(for value: Double?) -> CGPoint? {
+        guard let value, value.isFinite else { return nil }
         let radians: Double
         switch self {
         case .angle:
@@ -15,6 +15,6 @@ enum RotationDialScale {
             // Saturate at six o'clock rather than wrap a high speed back to zero.
             radians = min(100, max(-100, value)) * (.pi / 100)
         }
-        return CGPoint(x: sin(radians), y: -cos(radians))
+        return CGPoint(x: -sin(radians), y: -cos(radians))
     }
 }
