@@ -102,7 +102,7 @@ final class PointTracksTests: XCTestCase {
         XCTAssertTrue(tracks.extent { _ in false }.radii.isEmpty)
         sample(tracks, frame: 2, depth: nil)
         XCTAssertTrue(tracks.extent { _ in true }.radii.isEmpty)
-        XCTAssertEqual(tracks.objectRadius, percentile(extent.radii, 0.8))
+        XCTAssertEqual(tracks.objectRadius { _ in true }, percentile(extent.radii, 0.8))
     }
 
     func testSelectedCorrespondencesAndIdentityAfterReset() {
@@ -144,6 +144,30 @@ final class PointTracksTests: XCTestCase {
         let chords = tracks.chordConstraints(frame: 5, minLength: 0.02, maxFrames: 45, stride: 3)
         XCTAssertEqual(chords.count, 2, "reselected points must start a new depth history")
         for c in chords { XCTAssertEqual(c.chord.x, 0.2, accuracy: 1e-12) }
+    }
+
+    func testRotationMatchesRequireConsecutiveDepthAndSurviveOneSampleHistory() {
+        let tracks = populatedTracks()
+        sample(tracks, frame: 0, historyLength: 1)
+        XCTAssertTrue(tracks.rotationMatches(frame: 0).isEmpty)
+        sample(tracks, frame: 1, x: 0.1, historyLength: 1)
+        let matches = tracks.rotationMatches(frame: 1)
+        XCTAssertEqual(matches.count, 4)
+        sample(tracks, frame: 2, depth: nil, historyLength: 1)
+        XCTAssertEqual(tracks.rotationMatches(frame: 2).count, 4)
+        sample(tracks, frame: 3, x: 0.2, historyLength: 1)
+        XCTAssertTrue(tracks.rotationMatches(frame: 3).isEmpty, "a depth gap is not a one-frame rotation")
+        sample(tracks, frame: 4, x: 0.3, historyLength: 1)
+        XCTAssertEqual(tracks.rotationMatches(frame: 4).count, 4)
+    }
+
+    func testExcludedPointsDoNotSetRotationExtent() {
+        let tracks = populatedTracks()
+        sample(tracks, frame: 0)
+        _ = tracks.project(around: axis)
+        XCTAssertEqual(tracks.objectRadius { _ in false }, 0.1)
+        XCTAssertEqual(tracks.imageRadius(aroundX: 0, y: 0) { _ in false }, 0)
+        XCTAssertGreaterThan(tracks.objectRadius { _ in true }, 0)
     }
 
     func testEmptySelectionClearsPointsAndCorrespondences() {

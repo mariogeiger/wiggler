@@ -215,6 +215,9 @@ while let metaData = try reader.next() {
         line["recentAxis"] = recent
     }
     if let g = d.geometry {
+        line["rotationDelta"] = g.rotationDelta
+        line["rotationSupport"] = g.rotationSupport
+        line["backgroundCount"] = g.backgroundIDs?.count
         line["geometryHealthy"] = g.healthy
         line["disagreeStreak"] = g.disagreeStreak
     }

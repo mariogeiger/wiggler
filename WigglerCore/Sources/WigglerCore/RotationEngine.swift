@@ -14,6 +14,7 @@ public final class RotationEngine {
     private var corners = CornerDetector()
     private var estimator = AxisEstimator()
     private var angle = AngleTracker()
+    private var rotationConsensus = RotationConsensus()
     private var reloc: Relocalizer
     private var state: EngineState = .idle
 
@@ -74,6 +75,7 @@ public final class RotationEngine {
         displayedAxis = nil
         estimator.removeAll()
         angle.reset()
+        rotationConsensus = RotationConsensus()
         reloc.reset()
         axis = nil
         stability.reset()
@@ -167,7 +169,9 @@ public final class RotationEngine {
 
         // 1. Reuse the motion search's correspondences; each corner is tracked only once per frame. While the
         //    body turns, its rim moves at ω·R even when its inner points are still: nearby motion is its own.
-        let rimSpeed = abs(angle.lastDelta) / dt * Double(tracks.imageRadius(aroundX: marker.x, y: marker.y))
+        let rimSpeed =
+            abs(angle.lastDelta) / dt
+            * Double(tracks.imageRadius(aroundX: marker.x, y: marker.y) { rotationConsensus.rotatingIDs.contains($0) })
         let bodyMoving = axis != nil && rimSpeed > Double(locator.movingSpeed) / 2
         let selected = locator.selected(
             around: marker, retaining: tracks.ids, bodyMoving: bodyMoving, limit: config.targetTrackCount)
@@ -176,7 +180,7 @@ public final class RotationEngine {
             restartCalibration(cause: "cameraMotionVeto")
             diagnostics?.value.depthSamplingSkipped = "cameraMotionVeto"
         }
-        let (before, after) = tracks.update(selected, diagnostics: diagnostics)
+        tracks.update(selected, diagnostics: diagnostics)
         angle.removeAllExcept(ids: tracks.ids)
 
         // 2. Depth → 3D samples in world coordinates.
@@ -203,7 +207,14 @@ public final class RotationEngine {
             angleMinInliers: angle.minInliers, angleMaxBadFrames: angle.maxBadFrames)
         var angleOk = false
         if let ax = axis {
-            let observations = tracks.project(around: ax)
+            let decision = rotationConsensus.update(
+                tracks.rotationMatches(frame: frameIndex), axis: ax,
+                cameraToWorld: pose, intrinsics: input.intrinsics, retaining: tracks.ids)
+            diagnostics?.value.geometry?.rotationDelta = decision.delta
+            diagnostics?.value.geometry?.rotationSupport = decision.support
+            diagnostics?.value.geometry?.backgroundIDs = decision.backgroundIDs.sorted()
+            angle.removeAllExcept(ids: rotationConsensus.rotatingIDs)
+            let observations = tracks.project(around: ax).filter { rotationConsensus.rotatingIDs.contains($0.id) }
             diagnostics?.value.geometry?.observations = observations
             let up = angle.update(observations, diagnostics: diagnostics)
             diagnostics?.value.geometry?.update = up
@@ -227,7 +238,12 @@ public final class RotationEngine {
         //     taken over the tracked points (a hand, a reflection) and the geometric angle must not be trusted,
         //     however many "inliers" it reports.
         var agrees = true
-        let similarity = similarityRotation(from: before, to: after)
+        let rotatingPairs = selected.filter {
+            retainedIDs.contains($0.id) && rotationConsensus.rotatingIDs.contains($0.id)
+        }
+        let similarity = similarityRotation(
+            from: rotatingPairs.map { ($0.previousX, $0.previousY) },
+            to: rotatingPairs.map { ($0.x, $0.y) })
         diagnostics?.value.geometry?.similarityAngle = similarity?.angle
         diagnostics?.value.geometry?.similarityInliers = similarity?.inliers
         if let sim = similarity, sim.inliers >= 8 {
@@ -387,7 +403,7 @@ public final class RotationEngine {
 
     private func currentObjectRadius() -> Double {
         guard axis != nil else { return 0.1 }
-        return tracks.objectRadius
+        return tracks.objectRadius { rotationConsensus.rotatingIDs.contains($0) }
     }
 
     /// How far a full-window estimate may sit from the axis it refines (it lags a moved object).
@@ -400,6 +416,7 @@ public final class RotationEngine {
         guard let old = axis else { return }
         recordEvent(action: "adoptAxis", cause: cause)
         estimator.prune(before: frame + 1)
+        rotationConsensus = RotationConsensus()
         blend(into: old, target: newAxis.alignedSign(with: old.direction), alpha: 1)
         stability.reset()
         inconsistentAxisCount = 0
@@ -473,7 +490,8 @@ public final class RotationEngine {
     private func rebaseAngle() {
         guard let ax = axis else { return }
         recordEvent(action: "rebaseAngle", cause: "axisUpdated")
-        angle.rebase(tracks.observations(around: ax))
+        angle.removeAllExcept(ids: rotationConsensus.rotatingIDs)
+        angle.rebase(tracks.observations(around: ax).filter { rotationConsensus.rotatingIDs.contains($0.id) })
     }
 
     /// Fuse the appearance measurement into the integrated angle. Returns nothing: everything it does is either

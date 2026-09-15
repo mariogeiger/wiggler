@@ -7,6 +7,7 @@ final class PointTracks {
         var x: Float
         var y: Float
         var samples: [(frame: Int, p: V3)] = []
+        var previousSample: (frame: Int, p: V3)?
         var age = 0
         var hasDepthThisFrame = false
         var lastChordFrame = -1000
@@ -89,6 +90,7 @@ final class PointTracks {
                     diagnostics?.value.depth.append(observed)
                 }
             }
+            t.previousSample = t.samples.last
             t.hasDepthThisFrame = false
             guard let depth = input.depth else { continue }
             let observe: ((EngineDiagnostics.DepthNeighborhood) -> Void)? =
@@ -167,6 +169,16 @@ final class PointTracks {
         return observations
     }
 
+    /// Compare consecutive image positions using only the previous frame's depth.
+    func rotationMatches(frame: Int) -> [RotationImageMatch] {
+        tracks.compactMap { track in
+            guard let previous = track.previousSample, previous.frame == frame - 1 else {
+                return nil
+            }
+            return RotationImageMatch(id: track.id, point: previous.p, x: Double(track.x), y: Double(track.y))
+        }
+    }
+
     /// Observe a revised axis without replacing the extent measured before that revision.
     func observations(around axis: Axis) -> [AngleObservation] {
         var observations: [AngleObservation] = []
@@ -178,13 +190,13 @@ final class PointTracks {
     }
 
     /// Image extent of the tracked body around a point: the 90th percentile distance of its tracks (pixels).
-    func imageRadius(aroundX cx: Float, y cy: Float) -> Float {
-        let d = tracks.map { Double(hypot($0.x - cx, $0.y - cy)) }
+    func imageRadius(aroundX cx: Float, y cy: Float, including include: (Int) -> Bool) -> Float {
+        let d = tracks.filter { include($0.id) }.map { Double(hypot($0.x - cx, $0.y - cy)) }
         return d.isEmpty ? 0 : Float(percentile(d, 0.9))
     }
 
-    var objectRadius: Double {
-        let radii = tracks.filter { $0.radius > 0 }.map { $0.radius }
+    func objectRadius(including include: (Int) -> Bool) -> Double {
+        let radii = tracks.filter { $0.radius > 0 && include($0.id) }.map { $0.radius }
         return radii.isEmpty ? 0.1 : percentile(radii, 0.8)
     }
 

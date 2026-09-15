@@ -220,6 +220,14 @@ direction error and 0.7 mm position error with 6 mm noise and 20% outliers.
 
 ### 4. Angle: per-track offsets (the relative measurement)
 
+Before voting on the angle, each correspondence is tested against two predictions: stationary in world space,
+or rotated about the known axis. Both are projected into the current camera, using only the previous frame's
+depth. Deterministic one-point rotation hypotheses are scored by rotating-only support, so a static majority
+cannot outvote a moving minority. Fits within 1.5 pixels of both predictions are ambiguous: existing membership
+is preserved through stops and slow motion, but unknown points are not admitted. If neither model fits, the
+point does not vote. Fresh membership below this pixel noise floor is not observable from a single frame pair.
+Only admitted tracks feed angle offsets, rebasing, the image-rotation cross-check, and rotation extents.
+
 For each track i, the azimuth φᵢ(t) around the axis is θ(t) + oᵢ. The offset oᵢ is anchored when the track is
 created. θ(t) is the robust circular mean of φᵢ − oᵢ (Cauchy weighting followed by a 15° gate, with weights
 proportional to min(r, r_cap)²), predicted from the previous velocity to handle 10°/frame. Tracks that remain

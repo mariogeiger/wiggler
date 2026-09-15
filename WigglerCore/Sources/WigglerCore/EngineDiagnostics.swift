@@ -296,6 +296,9 @@ public struct EngineDiagnostics: Codable {
     }
 
     public struct GeometryDecision: Codable {
+        public var rotationDelta: Double?
+        public var rotationSupport: Int?
+        public var backgroundIDs: [Int]?
         public var observations: [AngleObservation] = []
         public var candidates: [AngleCandidate] = []
         public var radiusCap: Double?

@@ -75,6 +75,11 @@ final class EngineDiagnosticsTests: XCTestCase {
                 highestAllocatedID = event.id
             }
             if let geometry = diagnostics.geometry, let update = geometry.update {
+                let background = Set(geometry.backgroundIDs ?? [])
+                XCTAssertTrue(background.isDisjoint(with: Set(geometry.observations.map { $0.id })))
+                XCTAssertTrue(
+                    background.isDisjoint(with: Set(diagnostics.after.angleTracks.map { $0.id })),
+                    "axis refinement must not re-anchor rejected background points")
                 XCTAssertEqual(geometry.candidates.count, update.candidateCount)
                 XCTAssertEqual(geometry.candidates.filter { $0.inlier }.count, update.inlierCount)
                 XCTAssertTrue(geometry.candidates.allSatisfy { $0.inlier == (abs($0.residual) < geometry.angleGate) })
