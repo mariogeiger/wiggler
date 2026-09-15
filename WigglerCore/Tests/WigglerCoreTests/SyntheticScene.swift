@@ -114,3 +114,14 @@ struct SyntheticScene {
             image: img, intrinsics: intrinsics, cameraToWorld: .identity, poseValid: true, depth: dm, timestamp: 0)
     }
 }
+
+extension EngineConfig {
+    /// Budget for the synthetic scenes: the disc offers ~80 corners, and the per-point affine KLT dominates the
+    /// run time of every engine test. Forty measurement tracks exercise the same decisions as the default 160.
+    static let synthetic: EngineConfig = {
+        var config = EngineConfig()
+        config.targetTrackCount = 40
+        config.explorationPoints = 40
+        return config
+    }()
+}

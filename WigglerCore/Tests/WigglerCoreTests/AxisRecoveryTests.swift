@@ -6,11 +6,11 @@ final class AxisRecoveryTests: XCTestCase {
     func testNoisyRotationCanBuildAHarmonicMap() {
         let scene = SyntheticScene()
         var rng = LCG(seed: 71)
-        let engine = RotationEngine()
+        let engine = RotationEngine(config: .synthetic)
         var map = HarmonicMap(width: 1, height: 1)
         var ready = false
-        for f in 0..<650 {
-            var input = scene.render(theta: Double(f) * 0.04, depthNoise: 0.004, rng: &rng)
+        for f in 0..<330 {
+            var input = scene.render(theta: Double(f) * 0.08, depthNoise: 0.004, rng: &rng)
             input.timestamp = Double(f) / 60
             let out = engine.process(input)
             map.update(image: GrayImage(width: 1, height: 1, fill: 0.5), output: out)
@@ -22,16 +22,16 @@ final class AxisRecoveryTests: XCTestCase {
     func testCameraMotionInvalidatesAxisAndRequiresFreshGeometry() {
         let scene = SyntheticScene(normal: V3(0, 0, 1))
         var rng = LCG(seed: 53)
-        let engine = RotationEngine()
+        let engine = RotationEngine(config: .synthetic)
         var map = HarmonicMap(width: 1, height: 1)
         var previous = EngineOutput()
-        for f in 0..<1100 {
-            var input = scene.render(theta: Double(f) * 0.04, depthNoise: 0, rng: &rng)
+        for f in 0..<520 {
+            var input = scene.render(theta: Double(f) * 0.08, depthNoise: 0, rng: &rng)
             input.timestamp = Double(f) / 60
-            if f >= 500 { input.cameraToWorld.translation = V3(0.03, 0, 0) }
-            if f >= 530 && f < 580 { input.depth = nil }
+            if f >= 260 { input.cameraToWorld.translation = V3(0.03, 0, 0) }
+            if f >= 270 && f < 300 { input.depth = nil }
             let out = engine.process(input)
-            if f == 500 {
+            if f == 260 {
                 XCTAssertTrue(previous.axisStable)
                 XCTAssertTrue(map.hasFullTurn)
                 XCTAssertFalse(out.axisStable)
@@ -39,7 +39,7 @@ final class AxisRecoveryTests: XCTestCase {
                 XCTAssertEqual(out.constraintCount, 0)
             }
             map.update(image: GrayImage(width: 1, height: 1, fill: 0.5), output: out)
-            if f >= 500 && f < 580 {
+            if f >= 260 && f < 300 {
                 XCTAssertFalse(out.axisStable)
                 XCTAssertEqual(map.turnProgress, 0)
             }
@@ -49,44 +49,46 @@ final class AxisRecoveryTests: XCTestCase {
         XCTAssertTrue(map.hasFullTurn, "map did not rebuild after camera movement")
     }
 
-    func testMissingPoseAndTimestampGapInvalidateLockedAxis() {
-        for missingPose in [true, false] {
-            let scene = SyntheticScene(normal: V3(0, 0, 1))
-            var rng = LCG(seed: 61)
-            let engine = RotationEngine()
-            var previous = EngineOutput()
-            for f in 0..<700 {
-                var input = scene.render(theta: Double(f) * 0.04, depthNoise: 0, rng: &rng)
-                input.timestamp = Double(f) / 60 + (!missingPose && f >= 300 ? 1 : 0)
-                input.poseValid = !missingPose || f != 300
-                let out = engine.process(input)
-                if f == 300 {
-                    XCTAssertTrue(previous.axisStable)
-                    XCTAssertFalse(out.axisStable)
-                    XCTAssertNotNil(out.axis)
-                    XCTAssertEqual(out.constraintCount, 0)
-                }
-                previous = out
+    func testMissingPoseInvalidatesLockedAxis() { assertInvalidatedAndRecovered(missingPose: true) }
+
+    func testTimestampGapInvalidatesLockedAxis() { assertInvalidatedAndRecovered(missingPose: false) }
+
+    private func assertInvalidatedAndRecovered(missingPose: Bool) {
+        let scene = SyntheticScene(normal: V3(0, 0, 1))
+        var rng = LCG(seed: 61)
+        let engine = RotationEngine(config: .synthetic)
+        var previous = EngineOutput()
+        for f in 0..<420 {
+            var input = scene.render(theta: Double(f) * 0.08, depthNoise: 0, rng: &rng)
+            input.timestamp = Double(f) / 60 + (!missingPose && f >= 200 ? 1 : 0)
+            input.poseValid = !missingPose || f != 200
+            let out = engine.process(input)
+            if f == 200 {
+                XCTAssertTrue(previous.axisStable)
+                XCTAssertFalse(out.axisStable)
+                XCTAssertNotNil(out.axis)
+                XCTAssertEqual(out.constraintCount, 0)
             }
-            XCTAssertTrue(previous.axisStable)
+            previous = out
         }
+        XCTAssertTrue(previous.axisStable)
     }
 
     func testDisplacedObjectRecalibratesWithoutCameraMotion() {
-        let engine = RotationEngine()
+        let engine = RotationEngine(config: .synthetic)
         var rng = LCG(seed: 67)
         var previous = EngineOutput()
         var invalidated = false
-        for f in 0..<800 {
-            let shift = 0.04 * min(1, max(0, Double(f - 300) / 30))
+        for f in 0..<500 {
+            let shift = 0.04 * min(1, max(0, Double(f - 200) / 30))
             let scene = SyntheticScene(center: V3(0.05 + shift, -0.05, -0.75), normal: V3(0, 0, 1))
-            var input = scene.render(theta: Double(f) * 0.04, depthNoise: 0, rng: &rng)
+            var input = scene.render(theta: Double(f) * 0.08, depthNoise: 0, rng: &rng)
             input.timestamp = Double(f) / 60
             let out = engine.process(input)
-            if f == 300 { XCTAssertTrue(previous.axisStable) }
+            if f == 200 { XCTAssertTrue(previous.axisStable) }
             // Chords straddling the move fit neither axis; the recent window must fill with post-move chords
             // and contradict the old axis three evaluations in a row before the move is recognised.
-            if f > 300 && f < 480 && !out.axisStable {
+            if f > 200 && f < 360 && !out.axisStable {
                 invalidated = true
                 XCTAssertNotNil(out.axis)
             }
@@ -104,21 +106,21 @@ final class AxisRecoveryTests: XCTestCase {
         left.background = []
         right.background = []
         var rng = LCG(seed: 59)
-        let engine = RotationEngine()
+        let engine = RotationEngine(config: .synthetic)
         var before = EngineOutput(), after = EngineOutput()
         var invalidated = false
-        for f in 0..<850 {
-            var input = left.render(theta: Double(min(f, 349)) * 0.04, depthNoise: 0, rng: &rng)
-            let other = right.render(theta: Double(max(0, f - 350)) * 0.04, depthNoise: 0, rng: &rng)
+        for f in 0..<450 {
+            var input = left.render(theta: Double(min(f, 174)) * 0.08, depthNoise: 0, rng: &rng)
+            let other = right.render(theta: Double(max(0, f - 175)) * 0.08, depthNoise: 0, rng: &rng)
             input.image = GrayImage(
                 width: input.image.width, height: input.image.height,
                 pixels: zip(input.image.pixels, other.image.pixels).map { min(1, max(0, $0 + $1 - 0.5)) })
             input.depth!.depth = zip(input.depth!.depth, other.depth!.depth).map { min($0, $1) }
             input.timestamp = Double(f) / 60
             let out = engine.process(input)
-            if f == 349 { before = out }
-            if f > 350 && !out.axisStable && out.constraintCount < before.constraintCount { invalidated = true }
-            if f == 849 { after = out }
+            if f == 174 { before = out }
+            if f > 175 && !out.axisStable && out.constraintCount < before.constraintCount { invalidated = true }
+            if f == 449 { after = out }
         }
         XCTAssertTrue(before.axisStable, "first body did not stabilize")
         XCTAssertTrue(invalidated, "new moving support reused the old constraints")

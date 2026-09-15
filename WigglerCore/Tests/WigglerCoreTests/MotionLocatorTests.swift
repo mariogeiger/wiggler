@@ -7,7 +7,7 @@ final class MotionLocatorTests: XCTestCase {
     func testAutoMarkerLandsOnTheTurningDisc() {
         let scene = SyntheticScene()
         var rng = LCG(seed: 3)
-        let engine = RotationEngine()
+        let engine = RotationEngine(config: .synthetic)
         var theta = 0.0
         var placedAt: Int?
         var marker: Marker?

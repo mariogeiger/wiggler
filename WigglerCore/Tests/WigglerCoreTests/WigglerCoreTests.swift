@@ -226,7 +226,7 @@ final class EngineEndToEndTests: XCTestCase {
     func testLocksAxisAndTracksAngle() {
         let scene = SyntheticScene()
         var rng = LCG(seed: 21)
-        var config = EngineConfig()
+        var config = EngineConfig.synthetic
         config.constraintWindowFrames = 600
         config.roiRadiusFraction = Double(scene.projectedRadius() * 1.15) / Double(scene.height)
         let engine = RotationEngine(config: config)
@@ -236,18 +236,18 @@ final class EngineEndToEndTests: XCTestCase {
         var engineThetaAtLock = 0.0
         var maxErr = 0.0
         var last = EngineOutput()
-        for f in 0..<900 {
-            // 0 → ~40 rpm, with a pause and a reversal to exercise variable speed.
+        for f in 0..<560 {
+            // 0 → ~40 rpm, with a pause and a reversal to exercise variable speed (at 30 fps).
             let rpm: Double
             switch f {
-            case 0..<300: rpm = 40 * Double(f) / 300
-            case 300..<420: rpm = 25
-            case 420..<480: rpm = 0
+            case 0..<200: rpm = 40 * Double(f) / 200
+            case 200..<280: rpm = 25
+            case 280..<320: rpm = 0
             default: rpm = -30
             }
-            theta += rpm / 60 * 2 * .pi / 60
+            theta += rpm / 60 * 2 * .pi / 30
             var input = scene.render(theta: theta, depthNoise: 0.004, rng: &rng)
-            input.timestamp = Double(f) / 60
+            input.timestamp = Double(f) / 30
             last = engine.process(input)
             if last.state == .locked && lockedAt == nil {
                 lockedAt = f

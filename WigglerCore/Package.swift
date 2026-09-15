@@ -19,6 +19,9 @@ let package = Package(
         .executableTarget(
             name: "wigreplay", dependencies: ["WigglerCore", "CZlib"],
             swiftSettings: [.unsafeFlags(["-O"], .when(configuration: .debug))]),
-        .testTarget(name: "WigglerCoreTests", dependencies: ["WigglerCore"]),
+        .testTarget(
+            name: "WigglerCoreTests", dependencies: ["WigglerCore"],
+            // The synthetic scenes render hundreds of frames per test; unoptimised they dominate the run time.
+            swiftSettings: [.unsafeFlags(["-O"], .when(configuration: .debug))]),
     ]
 )

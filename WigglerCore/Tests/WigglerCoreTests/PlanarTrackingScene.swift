@@ -31,7 +31,21 @@ struct PlanarImageWarp {
     }
 }
 
+/// Textures are immutable and take a while to synthesise (thousands of Gaussian splats): one per (seed, kind).
+private var planarTextures: [String: GrayImage] = [:]
+private let planarTextureLock = NSLock()
+
 func makePlanarTexture(seed: UInt64, repeated: Bool) -> GrayImage {
+    let key = "\(seed)/\(repeated)"
+    planarTextureLock.lock()
+    defer { planarTextureLock.unlock() }
+    if let cached = planarTextures[key] { return cached }
+    let texture = synthesisePlanarTexture(seed: seed, repeated: repeated)
+    planarTextures[key] = texture
+    return texture
+}
+
+private func synthesisePlanarTexture(seed: UInt64, repeated: Bool) -> GrayImage {
     let side = 640
     var image = GrayImage(width: side, height: side, fill: 0.5)
     var random = PlanarTextureRandom(state: seed)
