@@ -3,6 +3,8 @@ import WigglerCore
 
 /// Per-frame UI selection and the generation of the converted input.
 struct RecordingSettings: Encodable {
+    var algorithm = RotationAlgorithm.trackedGeometry
+    var algorithmRevision = 0
     var harmonicSignal = "luma"
     var harmonicOrder: Int?
     var harmonicRevision = 0
@@ -16,12 +18,15 @@ struct RecordingSettings: Encodable {
     var conversionMillis = 0.0
 
     private enum CodingKeys: String, CodingKey {
+        case algorithm, algorithmRevision
         case harmonicSignal, harmonicOrder, harmonicRevision, inputRevision, convertedSignal
         case harmonicInputAccepted, harmonicTurnProgress, cameraTrackingState, deliveryMillis, conversionMillis
     }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(algorithm, forKey: .algorithm)
+        try container.encode(algorithmRevision, forKey: .algorithmRevision)
         try container.encode(harmonicSignal, forKey: .harmonicSignal)
         try container.encode(harmonicOrder, forKey: .harmonicOrder)
         try container.encode(harmonicRevision, forKey: .harmonicRevision)
@@ -107,6 +112,7 @@ struct RecordingFrameMetadata: Encodable {
         case recorderMillis
         case pendingFrames
         case diagnostics
+        case persistentDiagnostics
         case marker
         case axisOrigin
         case axisDirection
@@ -167,6 +173,7 @@ struct RecordingFrameMetadata: Encodable {
         try container.encode(recorderMillis, forKey: .recorderMillis)
         try container.encode(pendingFrames, forKey: .pendingFrames)
         try container.encodeIfPresent(output.diagnostics, forKey: .diagnostics)
+        try container.encodeIfPresent(output.persistentDiagnostics, forKey: .persistentDiagnostics)
         if let marker = output.marker {
             try container.encode([marker.x, marker.y], forKey: .marker)
         }

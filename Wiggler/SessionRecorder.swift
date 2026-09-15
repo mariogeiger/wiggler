@@ -105,11 +105,11 @@ final class SessionRecorder {
                 "chromaRed": "float32-le", "chromaBlue": "float32-le",
             ],
             "capture": "every processed frame; ARKit frames skipped while busy are counted",
-            "initialState": "warm: the engine was running before the first frame; no restorable snapshot",
+            "initialState": "warm: the engine was running before the first frame; not a restorable snapshot",
             "decisions":
-                "inputs and outputs only; replay the frames through RotationEngine (wigreplay) for the decision journal",
+                "inputs and outputs only; replay the frames through the selected RotationEstimator engine (wigreplay) for the decision journal",
             "replayLimitations":
-                "No pre-recording images, KLT pyramid, or appearance/harmonic library snapshot",
+                "No pre-recording images, KLT pyramid, persistent landmark map, or appearance/harmonic library snapshot",
             "nonFiniteNumbers": "NaN, +Infinity, -Infinity strings in JSON; IEEE 754 in float planes",
             "maximumPendingFrames": 8, "backpressure": "wait; never discard a processed frame",
             "writerCost": "recorderMillis = writer time of the previous frame; pendingFrames = frames queued at append",

@@ -5,9 +5,9 @@ a pottery wheel, an office chair, or anything rotating around a fixed axis. It i
 angle (0–360°) around that axis, and displays an augmented-reality cylinder along the axis and a ray
 (half-plane) that rotates with the object.
 
-No assumptions about the object, distance, or viewpoint. There is just one assumption: between two estimates,
-the object is approximately rigid and its axis approximately fixed ("semi-static"). All sensors are used
-continuously: camera image, LiDAR depth, and ARKit pose.
+No object-specific setup is required. Both engines assume an approximately rigid object and a fixed rotation
+axis. Usable image texture, depth and camera pose are needed; distance and viewpoint affect the available
+evidence. The camera image, LiDAR depth and ARKit pose are used continuously.
 
 ## Build
 
@@ -63,7 +63,8 @@ pre-commit run --all-files
 ## Usage
 
 1. Mount the phone in portrait orientation with the object in view.
-2. Move the object: its region and tracking points are selected automatically, without tapping the screen.
+2. With the default **Tracks** engine, move the object: its region and tracking points are selected automatically,
+   without tapping the screen.
    The engine also explores the rest of the image; points that become stationary are replaced by moving
    points. When everything stops, existing tracks are preserved.
    If another region becomes active while the first stops, calibration restarts on the new region.
@@ -87,7 +88,7 @@ Point colors: green = tracking consistent with rotation, red = inconsistent (han
 yellow = no depth, white = new.
 
 Controls sit in two columns just below the top safe area (below the Dynamic Island on supported iPhones).
-The left column has harmonic-order buttons, harmonic-input buttons, then point-count buttons on three rows.
+The left column has harmonic-order buttons, harmonic-input buttons, then whole-algorithm buttons on three rows.
 The right column has Record, with elapsed seconds while recording. Below it, two small dials show the angle
 (orange, one turn, zero at noon) and speed (cyan, with a white noon mark at zero). Both displays reverse the
 engine's sign; engine measurements and recordings are unchanged. Displayed positive rpm moves clockwise and
@@ -99,6 +100,17 @@ intrinsic sizes; outer margins give way when they need the width. The camera and
 
 `./tools/test-dials` checks the dial scales, app Swift syntax, and checked-in Xcode source membership on Linux
 with Docker and `memcap`. It does not replace an iOS build or a visual check on the phone.
+
+**Tracks** is the default, existing tracked-geometry engine, with a fixed target of 75 measurement points.
+**Map (exp.)** selects the experimental persistent rigid-map engine, with a fixed target of 200 image points.
+Each estimates both the axis and angle;
+there is no mixing of their estimates. Each owns its point budget; the interface has no point-count setting.
+The selection is saved. Switching clears the complete estimator and harmonic history immediately, including
+when switching away and back. Overlays, dials and recording consume the same output contract.
+
+The core keeps algorithm-specific state in `Algorithms/TrackedGeometry/` and `Algorithms/PersistentMap/`.
+`RotationEstimator` selects one complete engine. Image, depth, geometry and harmonic primitives remain shared.
+`RotationEngine` remains available unchanged for existing callers and historical configurable replays.
 
 The harmonic input buttons, below the harmonic-order row, select **Y** (luma / brightness, the default),
 **Cr** (red chroma, red relative to luminance), **Cb** (blue chroma, blue relative to luminance),
@@ -122,7 +134,7 @@ when it was converted for a processed frame.
 Record writes one streamed `.wig` file per session, without restarting the running engine. Version 2 saves
 **every processed frame**, not every ARKit frame: busy-frame drops and conversion failures are cumulative
 per-frame counters. Each frame includes the inputs (luma, depth, confidence, converted chroma, pose,
-intrinsics), the full active `EngineConfig`, harmonic signal/order and selection generations, the map's turn
+intrinsics), the full active `EngineConfig`, selected algorithm and its reset revision, harmonic signal/order and selection generations, the map's turn
 progress, camera tracking state, and the engine's outputs (including `axisStable`, `axisGeneration`,
 `angleMeasured`, tracked points with status). Recording stops by itself at 100 MiB and opens the share sheet.
 
@@ -134,9 +146,27 @@ and `wigreplay` recomputes the journal offline:
 cd WigglerCore && swift run -c release wigreplay recording.wig > decisions.jsonl   # --diagnostics for everything
 ```
 
+Without an override, replay follows each frame's `settings.algorithm` and `settings.algorithmRevision`.
+Older recordings without these fields use Tracks and their recorded configuration; unknown identifiers fail.
+To compare the same raw input with a fresh engine using its own defaults:
+
+```bash
+swift run -c release wigreplay recording.wig --algorithm persistentMap > map.jsonl
+swift run -c release wigreplay recording.wig --algorithm trackedGeometry > tracks.jsonl
+```
+
+The v2 container retains raw sensor planes separately. Sensor metadata and live measurements still share one
+JSON chunk; the proposed two-part metadata schema is not introduced here. Raw input means
+images, depth/confidence, pose, intrinsics and timestamps; live axes/angles are algorithm results, **not ground
+truth**. Offline estimators must not use those results as input. This permits a varied replay dataset without
+changing existing recordings. A separately validated reference is needed to assess absolute accuracy.
+Capture cadence depends on engine load: busy frames are dropped and counted. Offline A/B runs should use the
+same saved raw stream rather than assume that separate live runs have identical sampling.
+Only the selected chroma channel is recorded; luma and available depth remain independent of the engine.
+
 One JSON line per frame: outputs, events (resets, axis adoption), the full-window axis estimate, the
 recent-window test, geometry health. The engine starts cold, so the first calibration differs from the
-app's warm run; afterwards the replay is exact. This is **not a restorable engine snapshot**: earlier images,
+app's warm run; later agreement is not guaranteed either. This is **not a restorable engine snapshot**: earlier images,
 the KLT pyramid, and appearance/harmonic libraries are absent. `tools/replay.py` is a research pipeline,
 not an exact Swift replay.
 
@@ -166,14 +196,47 @@ PYTHONDONTWRITEBYTECODE=1 uv run --no-project --with numpy python -m unittest di
 ./tools/test-recording      # Linux + Docker + memcap: writer, Python readback, app syntax
 ```
 
-The Swift suite runs synthetic scenes through the whole engine; the test target is built with `-O` and the scenes
-use a 40-track budget. `cd WigglerCore && swift test --parallel` finishes in a few seconds on an Apple-silicon Mac
+The Swift suite runs synthetic scenes through both engines; the test target is built with `-O`. Legacy scenes
+use a 40-track budget; persistent-map scenes exercise its own default budget. `cd WigglerCore && swift test --parallel` finishes in a few seconds on an Apple-silicon Mac
 (about 19 s sequentially).
 
-## How it works
+## Experimental persistent map
+
+This engine acquires its own axis and angle from raw luma, depth, camera pose and intrinsics. It does not use
+recorded markers, axes or angles. Moving image points provide long-baseline 3D chords for the axis fit.
+Once acquired, the axis and landmark positions define a fixed body frame. A single rotation angle projects
+that map into each image. Returning landmarks can constrain the angle again, without replacing their original
+appearance. This is a native Swift engine, not the separate SIFT research prototype.
+
+Each landmark keeps its birth track identity, canonical position, image descriptor and a local surface plane
+measured from depth. While a track remains bound, its observed pixel supplies the correspondence for an absolute
+angle fit against the fixed map. This is not integration of adjacent-frame angles. The fit searches the whole
+circle; a tracked pixel must also pass an appearance check. Tracks can drift, so an identity is evidence, not a
+guarantee. Rejected bindings are released without changing the original anchor or binding it to a nearby corner.
+
+With too few bound tracks, appearance matching searches the whole circle for returning landmarks and rival
+angles. It projects every plane sample through the camera model at the trial rotation; missing or invalid
+planes are rejected. The phase filter predicts angle and speed and chooses the unwrapped turn number, which a
+single image cannot determine. Outputs distinguish measured angles from predictions. Losing the turn reference
+requires a new axis generation before measurements can resume, even if the geometric map is reused. Harmonics
+cannot span that boundary.
+
+The map holds at most 600 landmarks and inserts at most 24 per measured frame. Image-point histories retain at
+most one second, with an additional sample cap. These bounds do not establish an iPhone frame rate.
+
+The model assumes a rigid body and a fixed axis. A curved surface is only locally planar. Texture symmetry,
+occlusion, lighting changes, depth errors and an inaccurate axis can cause rejection or an incorrect match.
+Reported angle uncertainty is conditional on the fitted map and its observation model. It is not an absolute
+error bound and does not cover geometric bias, correlated patches or undetected aliases. Raw replays of a box
+and clay still show reference losses and incorrect angles, including nearly static estimates during rotation.
+This engine is experimental and is not yet a reliable replacement for Tracks. Synthetic tests and replay
+coverage are not independent ground truth or iPhone performance measurements.
+
+## How Tracks works
 
 The algorithms live in `WigglerCore` (pure Swift, without Apple platform-framework dependencies, so they can
 be tested on a Mac). The app (`Wiggler/`) converts ARKit frames, calls the engine, and renders the output.
+The following pipeline describes the unchanged tracked-geometry engine.
 
 ### 1. Point tracking (image)
 
@@ -187,8 +250,9 @@ The initial region is a stable cluster of moving corners. Camera movement and in
 selection. New points are activated by measured speed, not just contrast, even without depth and before the
 axis is estimated. Existing moving tracks keep their history; stationary tracks give way when there is
 reliable motion nearby. Stopping the object therefore does not empty the tracker. Exploratory points expire
-and are redistributed so a highly textured background cannot exhaust the search budget. The default budget
-is 160 measurement tracks plus 80 exploratory points. When the measurement tracks fall below half the target
+and are redistributed so a highly textured background cannot exhaust the search budget. The app budget
+is 75 measurement tracks plus 80 exploratory points. Direct `RotationEngine()` callers retain its historical
+160-track default; recorded configurations remain replayable. When the measurement tracks fall below half the target
 (an acceleration burst kills them faster than the rolling search replaces them), fresh corners are detected in
 the region every frame, beside the surviving tracks. The search continues after acquisition, including
 during calibration.

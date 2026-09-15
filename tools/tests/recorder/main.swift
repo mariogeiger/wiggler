@@ -9,6 +9,8 @@ func check(_ condition: Bool, _ message: String) throws {
 let directory = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 let recorder = SessionRecorder(directory: directory)
+try check(recorder.byteLimit == 100 * 1_048_576, "default byte limit changed")
+recorder.byteLimit = 400 * 1_048_576
 let engine = RotationEngine()
 let intrinsics = CameraIntrinsics(fx: 40, fy: 40, cx: 24, cy: 18)
 let smallPixels = (0..<(48 * 36)).map { UInt8($0 % 251) }
@@ -46,6 +48,20 @@ for index in 5..<29 {
             harmonicSignal: index % 3 == 1 ? "chromaRed" : (index % 3 == 2 ? "chromaBlue" : "luma"),
             harmonicOrder: index < 17 ? nil : 2),
         droppedFrames: index, conversionFailures: 2, processedFps: 20)
+}
+let switchedEngine = RotationEstimator()
+recorder.start(width: 48, height: 36, context: ["test": "algorithm switches"])
+let switchedURL = recorder.url!
+for index in 0..<6 {
+    let algorithm = index < 2 || index >= 4 ? RotationAlgorithm.trackedGeometry : .persistentMap
+    let revision = index < 2 ? 0 : (index < 4 ? 1 : 3)
+    switchedEngine.select(algorithm, revision: revision)
+    let input = frame(index)
+    let output = switchedEngine.process(input, captureDiagnostics: index == 3)
+    recorder.append(
+        input: input, luma8: smallPixels, output: output, config: switchedEngine.config,
+        settings: RecordingSettings(algorithm: switchedEngine.algorithm, algorithmRevision: switchedEngine.revision),
+        droppedFrames: 0, conversionFailures: 0, processedFps: 20)
 }
 // Starting again must drain the old session and never reuse its path, even within one second.
 recorder.start(width: 480, height: 360, context: ["test": "single large file"])
@@ -89,8 +105,18 @@ try check(status.seconds == Double(largeCount - 1) / 30, "duration is wrong")
 recorder.stop()
 try check(recorder.url == largeURL, "repeat stop discarded URL")
 try check(
-    try FileManager.default.contentsOfDirectory(atPath: directory.path).filter { $0.hasSuffix(".wig") }.count == 2,
+    try FileManager.default.contentsOfDirectory(atPath: directory.path).filter { $0.hasSuffix(".wig") }.count == 3,
     "session was split")
+let limited = SessionRecorder(directory: directory)
+limited.byteLimit = 1
+limited.start(width: 48, height: 36, context: ["test": "byte limit"])
+try check(
+    !limited.append(
+        input: frame(0), luma8: smallPixels, output: EngineOutput(), config: EngineConfig(),
+        settings: RecordingSettings(), droppedFrames: 0, conversionFailures: 0, processedFps: 20),
+    "reached byte limit did not stop append")
+let limitedStatus = limited.status(now: 0)
+try check(!limitedStatus.recording && limitedStatus.limitReached && limitedStatus.error == nil, "limit not reported")
 let invalid = SessionRecorder(directory: directory.appendingPathComponent("missing/child"))
 invalid.start(width: 48, height: 36, context: [:])
 try check(!invalid.isRecording && invalid.status(now: 0).error != nil, "open failure was hidden")
@@ -108,6 +134,7 @@ recorder.start(width: 48, height: 36, context: [:])
 try check(recorder.isRecording && recorder.status(now: 0).error == nil, "could not recover after error")
 recorder.stop()
 let manifest: [String: Any] = [
+    "switches": switchedURL.lastPathComponent,
     "warm": firstURL.lastPathComponent, "large": largeURL.lastPathComponent,
     "failed": failedURL.lastPathComponent, "largeFrames": largeCount, "largeBytes": size, "compressible": compressible,
 ]

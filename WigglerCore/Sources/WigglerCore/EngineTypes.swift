@@ -169,11 +169,14 @@ public struct EngineOutput {
     public var message: String = ""
     /// Decision observations only; not a serializable engine checkpoint.
     public var diagnostics: EngineDiagnostics? = nil
+    /// Experimental map observations, not an engine checkpoint. Present only during diagnostic capture.
+    public var persistentDiagnostics: PersistentMapDiagnostics? = nil
     public var processingMillis: Double = 0
     public var angleDispersionDegrees: Double = 0
     public var relocalizerAnalysed = false
     public var lastRelocalizationAge: Int = -1
-    /// 1-sigma uncertainty of the absolute angle (degrees): small while everything agrees, large after a loss.
+    /// The selected engine's angle-uncertainty scale, degrees. It is not an absolute-error guarantee;
+    /// the persistent-map filter conditions its sigma on a fixed axis/map and independent pixel noise.
     public var angleUncertaintyDegrees: Double = 0
     public init() {}
 }

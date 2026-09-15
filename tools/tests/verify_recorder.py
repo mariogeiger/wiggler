@@ -19,6 +19,8 @@ for index, frame in enumerate(frames, 5):
     assert meta["sequence"] == index - 5
     assert meta["diagnostics"]["frameIndex"] == index + 1
     assert meta["config"]["targetTrackCount"] == (60 if index < 17 else 65)
+    assert meta["settings"]["algorithm"] == "trackedGeometry"
+    assert meta["settings"]["algorithmRevision"] == 0
     assert meta["settings"]["harmonicOrder"] == (None if index < 17 else 2)
     assert meta["droppedFrames"] == index and meta["conversionFailures"] == 2
     assert meta["t"] == index / 20
@@ -43,6 +45,16 @@ for index, frame in enumerate(frames, 5):
 assert frames[0].meta["rpm"] == "+Infinity"
 assert "initialContext" in frames[0].meta["diagnostics"]
 assert "initialContext" not in frames[1].meta["diagnostics"]
+_, switched = wigreader.read(root / manifest["switches"])
+assert len(switched) == 6
+for index, frame in enumerate(switched):
+    is_map = 2 <= index < 4
+    assert frame.meta["settings"]["algorithm"] == ("persistentMap" if is_map else "trackedGeometry")
+    assert frame.meta["settings"]["algorithmRevision"] == (0 if index < 2 else 1 if index < 4 else 3)
+    assert frame.meta["config"]["targetTrackCount"] == (200 if is_map else 75)
+    assert "diagnostics" not in frame.meta
+    assert ("persistentDiagnostics" in frame.meta) == (index == 3)
+assert switched[0].meta["axisGeneration"] < switched[2].meta["axisGeneration"] < switched[4].meta["axisGeneration"]
 count = 0
 state = 123
 noise = np.empty(480 * 360, dtype="u1")
@@ -57,7 +69,7 @@ for index, frame in enumerate(wigreader.iter_frames(root / manifest["large"])):
     expected_luma = index % 251 if manifest["compressible"] else noise ^ (index % 251)
     assert np.all(frame.luma == expected_luma)
     assert frame.depth is None and frame.chroma_red is None and frame.chroma_blue is None
-    assert frame.meta["diagnostics"] is None
+    assert "diagnostics" not in frame.meta
     assert not {"marker", "axisOrigin", "axisDirection"}.intersection(frame.meta)
 assert count == manifest["largeFrames"]
 assert (root / manifest["large"]).stat().st_size == manifest["largeBytes"]

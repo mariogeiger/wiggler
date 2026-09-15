@@ -57,7 +57,7 @@ struct ContentView: View {
                     harmonicSignalControl.fixedSize()
                 }
                 GridRow {
-                    pointCountControl.fixedSize()
+                    algorithmControl.fixedSize()
                 }
             }
         }
@@ -95,20 +95,14 @@ struct ContentView: View {
         .fixedSize()
     }
 
-    private var pointCountControl: some View {
+    private var algorithmControl: some View {
         HStack(spacing: 2) {
-            selectionButton("−", selected: false) {
-                controller.adjustTrackCount(by: -5)
+            ForEach(RotationAlgorithm.allCases, id: \.self) { algorithm in
+                selectionButton(algorithm.shortLabel, selected: controller.algorithm == algorithm) {
+                    controller.setAlgorithm(algorithm)
+                }
+                .accessibilityLabel(algorithm.label)
             }
-            .accessibilityLabel("Decrease point count")
-            Text("\(controller.targetTrackCount) pts")
-                .font(.caption2.monospaced())
-                .foregroundStyle(.white.opacity(0.8))
-                .padding(.horizontal, 4)
-            selectionButton("+", selected: false) {
-                controller.adjustTrackCount(by: 5)
-            }
-            .accessibilityLabel("Increase point count")
         }
         .padding(3)
         .background(.black.opacity(0.35), in: Capsule())

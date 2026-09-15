@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+root=$(cd "$(dirname "$0")/.." && pwd)
+artifacts=$(mktemp -d)
+trap 'rm -rf "$artifacts"' EXIT
+image=swift@sha256:9f82fca7d577f78772c1ef0c38392f9bee05d92c8483f903005cded067ded5ee
+memcap -h 4G -m 5G -s 0 docker run --rm --memory=4g --memory-swap=4g --cpus=2 \
+    --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$root:/src:ro" -v "$artifacts:/test" -w /src "$image" \
+    swift build --package-path WigglerCore --scratch-path /test/build --product wigreplay --static-swift-stdlib
+PYTHONDONTWRITEBYTECODE=1 python3 "$root/tools/tests/verify_wigreplay.py" \
+    "$artifacts/build/debug/wigreplay" "$artifacts"

@@ -10,12 +10,12 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
 
     /// Latest engine output for the overlays (published at ~30 Hz).
     @Published private(set) var output = EngineOutput()
-    /// Number of tracked points the engine aims for. Persisted across launches.
-    @Published private(set) var targetTrackCount = EngineConfig().targetTrackCount {
-        didSet { UserDefaults.standard.set(targetTrackCount, forKey: Self.trackCountKey) }
+    @Published private(set) var algorithm = RotationAlgorithm.trackedGeometry {
+        didSet { UserDefaults.standard.set(algorithm.rawValue, forKey: Self.algorithmKey) }
     }
-    private static let trackCountKey = "targetTrackCount"
-    private static let trackCountRange = 5...400
+    private static let algorithmKey = "rotationAlgorithm"
+    /// Main-thread selection generation, read by the frame and engine queues under the snapshot lock.
+    private var algorithmRevision = 0
     /// Harmonics in the rotation angle that the map fits and the user can display.
     static let harmonicOrders = [1, 2, 3]
     /// Which harmonic of the current image is drawn over the camera image; nil = off. Persisted.
@@ -42,7 +42,7 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
 
     // MARK: Private
 
-    private let engine = RotationEngine()
+    private let engine = RotationEstimator()
     private let converter = FrameConverter()
     private let recorder = SessionRecorder()
     /// ARKit delivers frames here; conversion is quick and the ARFrame is released immediately.
@@ -86,19 +86,16 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
         sceneView.preferredFramesPerSecond = 60
         sceneView.scene.rootNode.addChildNode(overlay)  // the harmonic overlay attaches itself to the camera
         overlay.isHidden = true
-        let saved = UserDefaults.standard.integer(forKey: Self.trackCountKey)
-        if saved != 0 { targetTrackCount = Self.clampTrackCount(saved) }
-        engine.config.targetTrackCount = targetTrackCount
+        algorithm =
+            UserDefaults.standard.string(forKey: Self.algorithmKey)
+            .flatMap(RotationAlgorithm.init(rawValue:)) ?? .trackedGeometry
+        engine.select(algorithm, revision: algorithmRevision)
         let savedOrder = UserDefaults.standard.integer(forKey: Self.harmonicOrderKey)
         harmonicOrder = Self.harmonicOrders.contains(savedOrder) ? savedOrder : nil
         harmonicOrderEngine = harmonicOrder
         harmonicSignal = HarmonicSignal(savedValue: UserDefaults.standard.string(forKey: Self.harmonicSignalKey))
         harmonics.select(harmonicSignal)
         harmonicSignalSnapshot = harmonicSignal
-    }
-
-    private static func clampTrackCount(_ n: Int) -> Int {
-        max(trackCountRange.lowerBound, min(trackCountRange.upperBound, n))
     }
 
     // MARK: Lifecycle
@@ -133,10 +130,23 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
 
     // MARK: Controls (main thread)
 
-    func adjustTrackCount(by delta: Int) {
-        targetTrackCount = Self.clampTrackCount(targetTrackCount + delta)
-        let n = targetTrackCount
-        engineQueue.async { [engine] in engine.config.targetTrackCount = n }
+    func setAlgorithm(_ algorithm: RotationAlgorithm) {
+        guard self.algorithm != algorithm else { return }
+        self.algorithm = algorithm
+        output = EngineOutput()
+        harmonicProgress = 0
+        lock.lock()
+        algorithmRevision += 1
+        let revision = algorithmRevision
+        latestOutput = EngineOutput()
+        latestHarmonicImage = nil
+        engineQueue.async { [self] in
+            engine.select(algorithm, revision: revision)
+            harmonics = HarmonicFit(signal: harmonics.signal, orders: Self.harmonicOrders)
+            renderedHarmonicImage = nil
+            lastHarmonicRender = .distantPast
+        }
+        lock.unlock()
     }
 
     func setHarmonicOrder(_ l: Int?) {
@@ -185,6 +195,8 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
                     "deviceModel": deviceModel,
                     "videoFormat": videoFormat,
                     "harmonicOrders": Self.harmonicOrders,
+                    "algorithm": engine.algorithm.rawValue,
+                    "algorithmRevision": engine.revision,
                     "posePolicy": "normal and limited(excessiveMotion/insufficientFeatures) accepted",
                 ])
             let status = recorder.status(now: lastProcessedTimestamp ?? 0)
@@ -254,6 +266,7 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
         if !busy { engineBusy = true }
         let signal = harmonicSignalSnapshot
         let inputRevision = harmonicRevision
+        let inputAlgorithmRevision = algorithmRevision
         let size = viewportSize
         lock.unlock()
         if busy {
@@ -276,6 +289,12 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
         let transform = frame.displayTransform(for: .portrait, viewportSize: size)
         // Nothing below touches `frame` any more.
         engineQueue.async { [self] in
+            guard inputAlgorithmRevision == engine.revision else {
+                lock.lock()
+                engineBusy = false
+                lock.unlock()
+                return
+            }
             if let lt = lastProcessedTimestamp, input.timestamp > lt {
                 processedFps += 0.1 * (1.0 / (input.timestamp - lt) - processedFps)
             }
@@ -284,17 +303,20 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
             let out = engine.process(input)
             updateHarmonics(input: inputRevision == harmonicRevisionEngine ? input : nil, output: out)
             lock.lock()
-            latestOutput = out
-            if harmonicRevisionEngine == harmonicRevision {
-                latestHarmonicImage = renderedHarmonicImage
+            if engine.revision == algorithmRevision {
+                latestOutput = out
+                if harmonicRevisionEngine == harmonicRevision {
+                    latestHarmonicImage = renderedHarmonicImage
+                }
+                latestDisplayTransform = transform
             }
-            latestDisplayTransform = transform
             engineBusy = false
             lock.unlock()
             if recording {
                 let appended = recorder.append(
                     input: input, luma8: luma8, output: out, config: engine.config,
                     settings: RecordingSettings(
+                        algorithm: engine.algorithm, algorithmRevision: engine.revision,
                         harmonicSignal: harmonics.signal.rawValue, harmonicOrder: harmonicOrderEngine,
                         harmonicRevision: harmonicRevisionEngine, inputRevision: inputRevision,
                         convertedSignal: signal.rawValue,
@@ -310,10 +332,14 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
                 let status = recorder.status(now: input.timestamp)
                 let progress = harmonics.turnProgress
                 let revision = harmonicRevisionEngine
+                let outputAlgorithmRevision = engine.revision
                 DispatchQueue.main.async { [weak self] in
-                    self?.output = out
-                    if self?.harmonicRevision == revision { self?.harmonicProgress = progress }
-                    self?.recorderStatus = status
+                    guard let self else { return }
+                    if algorithmRevision == outputAlgorithmRevision {
+                        output = out
+                        if harmonicRevision == revision { harmonicProgress = progress }
+                    }
+                    recorderStatus = status
                 }
             }
         }

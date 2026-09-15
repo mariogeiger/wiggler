@@ -9,7 +9,7 @@ memcap -h 4G -m 5G -s 0 docker run --rm --memory=4g --memory-swap=4g --cpus=2 \
     --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$root:/src:ro" -v "$artifacts:/test" -w /src "$image" \
     bash -lc 'set -euo pipefail
         swiftc -O -enable-testing -emit-library -emit-module -module-name WigglerCore \
-            WigglerCore/Sources/WigglerCore/*.swift -o /test/libWigglerCore.so -emit-module-path /test/WigglerCore.swiftmodule
+            $(find WigglerCore/Sources/WigglerCore -name "*.swift" -print | sort) -o /test/libWigglerCore.so -emit-module-path /test/WigglerCore.swiftmodule
         swiftc -O -I /test -I tools/tests/recorder/CZlib -L /test -lWigglerCore -Xlinker -rpath -Xlinker /test \
             Wiggler/SessionRecorder.swift Wiggler/RecordingFrameMetadata.swift Wiggler/RecordingChunkCodec.swift tools/tests/recorder/*.swift -o /test/recorder-test
         /test/recorder-test /test/recordings
