@@ -139,21 +139,15 @@ writer was slower than the engine at that moment; at eight the engine waits).
 All chunk lengths are UInt32 little-endian. A JSON header identifies format, app version/build, OS and an
 executable SHA-256 when available; a source revision is explicitly marked as not embedded. Each frame has
 six chunks: JSON metadata, luma UInt8, depth Float32, confidence UInt8, Cr Float32, Cb Float32. Metadata and
-images use low-latency deflate while streaming. After Stop, a background pass recompresses each chunk at
-zlib level 9 before opening the share sheet. The record button shows Preparing during this pass; the camera
-and engine keep running. Each chunk keeps its original encoding unless the new encoding is smaller, so
-export never increases file size. No ZIP wrapper, format change, quantization, or frame removal is involved.
-Every nonempty frame chunk starts with a codec byte: raw (0) or raw deflate (1), followed by the payload.
+images use low-latency deflate while streaming; Stop opens the share sheet on the file as written, with no
+further pass. Every nonempty frame chunk starts with a codec byte: raw (0) or raw deflate (1), followed by
+the payload.
 Raw storage is used only when compression fails or would not reduce size. Absent image planes have empty chunks. Float
 planes are little-endian and row-major; signed chroma preserves the converted input exactly. Dimensions
 are per frame. JSON nonfinite numbers use `NaN`, `+Infinity`, `-Infinity` strings; float planes retain IEEE 754.
 The writer holds at most eight pending frames and waits rather than dropping processed inputs; the recorded
 timestamps, drop counters and `pendingFrames` expose any slowdown.
-Write failures are shown, not silently replaced with empty metadata. Export verifies each recompressed
-chunk byte-for-byte and writes one chunk at a time to a temporary file beside the original. Only a complete,
-smaller, synced file replaces the original atomically. An export failure keeps the original and shows an
-error instead of sharing a partial file. Header and decoded chunk bytes are unchanged; existing v2 readers
-work without updates. Legacy v1 files are left untouched. Size savings depend on the recording's contents.
+Write failures are shown, not silently replaced with empty metadata.
 
 `tools/wigreader.py` reads both v1 and v2 and rejects malformed or truncated chunks. For long recordings,
 use `iter_frames(path)` instead of `read(path)`, which loads all frames. Frame metadata includes `config`,
@@ -161,7 +155,7 @@ use `iter_frames(path)` instead of `read(path)`, which loads all frames. Frame m
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 uv run --no-project --with numpy python -m unittest discover -s tools/tests
-./tools/test-recording      # Linux + Docker + memcap: writer, lossless export, Python readback, app syntax
+./tools/test-recording      # Linux + Docker + memcap: writer, Python readback, app syntax
 ```
 
 The Swift suite runs synthetic scenes through the whole engine; the test target is built with `-O` and the scenes

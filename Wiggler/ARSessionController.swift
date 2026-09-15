@@ -45,7 +45,6 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
     private let engine = RotationEngine()
     private let converter = FrameConverter()
     private let recorder = SessionRecorder()
-    private let compressionQueue = DispatchQueue(label: "ch.mariogeiger.wiggler.compression", qos: .utility)
     /// ARKit delivers frames here; conversion is quick and the ARFrame is released immediately.
     private let frameQueue = DispatchQueue(label: "ch.mariogeiger.wiggler.frames", qos: .userInteractive)
     /// The engine runs here; frames arriving while it is busy are dropped (never queued) so ARKit is never starved.
@@ -197,37 +196,15 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
         }
     }
 
-    /// Engine queue, after the recorder has closed its file (by the button or by its byte limit): export it.
+    /// Engine queue, after the recorder has closed its file (by the button or by its byte limit): share it as is.
     private func finishRecording() {
         let status = recorder.status(now: lastProcessedTimestamp ?? 0)
         let shareURL = status.error == nil ? recorder.url : nil
         DispatchQueue.main.async { [weak self] in
             self?.recorderStatus = status
             self?.recordingError = status.error
-            if let shareURL {
-                self?.preparingRecordingShare = true
-                self?.compressAndShare(at: shareURL)
-            } else {
-                self?.preparingRecordingShare = false
-            }
-        }
-    }
-
-    private func compressAndShare(at url: URL) {
-        compressionQueue.async { [weak self] in
-            do {
-                try RecordingFileCompression.recompress(at: url)
-                DispatchQueue.main.async { [weak self] in
-                    self?.preparingRecordingShare = false
-                    self?.pendingShare = ShareItem(urls: [url])
-                }
-            } catch {
-                let message = "Compression failed. Original recording kept. \(error.localizedDescription)"
-                DispatchQueue.main.async { [weak self] in
-                    self?.preparingRecordingShare = false
-                    self?.recordingError = message
-                }
-            }
+            self?.preparingRecordingShare = false
+            if let shareURL { self?.pendingShare = ShareItem(urls: [shareURL]) }
         }
     }
 
