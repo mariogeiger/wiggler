@@ -51,6 +51,11 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
     /// The engine runs here; frames arriving while it is busy are dropped (never queued) so ARKit is never starved.
     private let engineQueue = DispatchQueue(label: "ch.mariogeiger.wiggler.engine", qos: .userInteractive)
     private var engineBusy = false
+    private var videoFormat = "unknown"
+    /// ARKit's delivery cadence and our conversion cost, measured on the frame queue for the recording.
+    private var lastDeliveredTimestamp: Double?
+    private var deliveryMillis = 0.0
+    private var conversionMillis = 0.0
     private var droppedFrames = 0
     private var conversionFailures = 0
     private var processedFps = 0.0
@@ -115,6 +120,8 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
         {
             config.videoFormat = f
         }
+        videoFormat =
+            "\(Int(config.videoFormat.imageResolution.width))x\(Int(config.videoFormat.imageResolution.height))@\(config.videoFormat.framesPerSecond)"
         sceneView.session.run(config, options: [.resetTracking, .removeExistingAnchors])
         // A measurement session is hands-off by nature: the phone must not lock while the camera is running.
         UIApplication.shared.isIdleTimerDisabled = true
@@ -177,6 +184,7 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
                 width: FrameConverter.engineWidth, height: FrameConverter.engineHeight,
                 context: [
                     "deviceModel": deviceModel,
+                    "videoFormat": videoFormat,
                     "harmonicOrders": Self.harmonicOrders,
                     "posePolicy": "normal and limited(excessiveMotion/insufficientFeatures) accepted",
                 ])
@@ -262,6 +270,8 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
     // MARK: ARSessionDelegate (frame queue)
 
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
+        deliveryMillis = lastDeliveredTimestamp.map { (frame.timestamp - $0) * 1000 } ?? 0
+        lastDeliveredTimestamp = frame.timestamp
         lock.lock()
         let busy = engineBusy
         if !busy { engineBusy = true }
@@ -273,6 +283,7 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
             droppedFrames += 1
             return
         }
+        let conversionStart = Date()
         guard let input = converter.convert(frame, harmonicSignal: signal) else {
             conversionFailures += 1
             lock.lock()
@@ -280,8 +291,10 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
             lock.unlock()
             return
         }
+        conversionMillis = Date().timeIntervalSince(conversionStart) * 1000
         let luma8 = converter.lastLuma8
         let dropped = droppedFrames, failedConversions = conversionFailures
+        let delivery = deliveryMillis, conversion = conversionMillis
         let cameraTrackingState = String(describing: frame.camera.trackingState)
         let transform = frame.displayTransform(for: .portrait, viewportSize: size)
         // Nothing below touches `frame` any more.
@@ -309,7 +322,8 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
                         harmonicRevision: harmonicRevisionEngine, inputRevision: inputRevision,
                         convertedSignal: signal.rawValue,
                         harmonicInputAccepted: inputRevision == harmonicRevisionEngine,
-                        harmonicTurnProgress: harmonics.turnProgress, cameraTrackingState: cameraTrackingState),
+                        harmonicTurnProgress: harmonics.turnProgress, cameraTrackingState: cameraTrackingState,
+                        deliveryMillis: delivery, conversionMillis: conversion),
                     droppedFrames: dropped, conversionFailures: failedConversions, processedFps: processedFps)
                 if !appended { finishRecording() }
             }

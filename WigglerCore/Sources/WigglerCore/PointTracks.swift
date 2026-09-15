@@ -177,6 +177,12 @@ final class PointTracks {
         return observations
     }
 
+    /// Image extent of the tracked body around a point: the 90th percentile distance of its tracks (pixels).
+    func imageRadius(aroundX cx: Float, y cy: Float) -> Float {
+        let d = tracks.map { Double(hypot($0.x - cx, $0.y - cy)) }
+        return d.isEmpty ? 0 : Float(percentile(d, 0.9))
+    }
+
     var objectRadius: Double {
         let radii = tracks.filter { $0.radius > 0 }.map { $0.radius }
         return radii.isEmpty ? 0.1 : percentile(radii, 0.8)

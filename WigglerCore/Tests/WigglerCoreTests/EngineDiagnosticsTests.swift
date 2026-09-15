@@ -4,7 +4,7 @@ import XCTest
 
 final class EngineDiagnosticsTests: XCTestCase {
     func testDefaultAPIAndCodableConfig() throws {
-        let engine = RotationEngine()
+        let engine = RotationEngine(config: .synthetic)
         XCTAssertNil(engine.process(blankFrame()).diagnostics)
         XCTAssertNil(EngineOutput().diagnostics)
         var config = EngineConfig()
@@ -24,8 +24,8 @@ final class EngineDiagnosticsTests: XCTestCase {
     func testCaptureDoesNotChangeOutputsOrResetWarmTracking() throws {
         let scene = SyntheticScene()
         var rng = LCG(seed: 3)
-        let plain = RotationEngine()
-        let captured = RotationEngine()
+        let plain = RotationEngine(config: .synthetic)
+        let captured = RotationEngine(config: .synthetic)
         var sawWarmHistory = false
         var sawFreshChords = false
         var sawEstimate = false
@@ -118,7 +118,7 @@ final class EngineDiagnosticsTests: XCTestCase {
     }
 
     func testColdIdleAndInvalidFrameIntervalDiagnostics() throws {
-        let engine = RotationEngine()
+        let engine = RotationEngine(config: .synthetic)
         let first = try XCTUnwrap(engine.process(blankFrame(), captureDiagnostics: true).diagnostics)
         XCTAssertEqual(first.before.state, .idle)
         XCTAssertEqual(first.after.state, .idle)
@@ -133,8 +133,8 @@ final class EngineDiagnosticsTests: XCTestCase {
     }
 
     func testBackToBackCaptureSessionsIncludeContextWithoutReset() throws {
-        let engine = RotationEngine()
-        let plain = RotationEngine()
+        let engine = RotationEngine(config: .synthetic)
+        let plain = RotationEngine(config: .synthetic)
         for frame in 0..<5 {
             let input = blankFrame(time: Double(frame) / 60)
             let output = engine.process(input, captureDiagnostics: true)
@@ -154,7 +154,7 @@ final class EngineDiagnosticsTests: XCTestCase {
     }
 
     func testCameraRotationVetoRecordsMeasuredAngleAndLimit() throws {
-        let engine = RotationEngine()
+        let engine = RotationEngine(config: .synthetic)
         var output = EngineOutput()
         for frame in 0...5 {
             var input = blankFrame(time: Double(frame) * 0.1)
@@ -219,5 +219,5 @@ func blankFrame(time: Double = 0, depth: DepthMap? = nil) -> FrameInput {
 
 func diagnosticsRecorder() throws -> EngineDiagnosticsRecorder {
     try EngineDiagnosticsRecorder(
-        XCTUnwrap(RotationEngine().process(blankFrame(), captureDiagnostics: true).diagnostics))
+        XCTUnwrap(RotationEngine(config: .synthetic).process(blankFrame(), captureDiagnostics: true).diagnostics))
 }

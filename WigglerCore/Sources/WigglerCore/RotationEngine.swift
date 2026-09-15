@@ -134,12 +134,14 @@ public final class RotationEngine {
 
         let roiRadius = Float(config.roiRadiusFraction) * Float(input.image.height)
         let retainedIDs = tracks.ids
-        locator.maxPoints = max(120, config.targetTrackCount + 80)
+        locator.maxPoints = config.targetTrackCount + config.explorationPoints
         locator.maxResidual = config.maxResidual
+        // Tracks die in bursts when the object accelerates; below half the target, refill the region every frame.
+        let refill = tracks.count < config.targetTrackCount / 2 ? marker.map { ($0.x, $0.y, roiRadius) } : nil
         let hit = locator.add(
             image: input.image, prev: prevPyramid, cur: pyramid,
             pose: input.poseValid ? input.cameraToWorld : nil, dt: frameDT, time: input.timestamp,
-            radius: roiRadius, klt: klt, corners: corners, retaining: retainedIDs)
+            radius: roiRadius, klt: klt, corners: corners, retaining: retainedIDs, refill: refill)
         diagnostics?.value.locator = locator.diagnosticState()
         if let hit {
             if let m = marker {
@@ -163,12 +165,12 @@ public final class RotationEngine {
             return finishDiagnostics(out)
         }
 
-        // 1. Reuse the motion search's correspondences; each corner is tracked only once per frame. Once an axis
-        //    exists, the angle tracker knows which tracks belong to the rotating body better than any speed test.
-        let retained = tracks.ids
-        let vouched: Set<Int> = axis == nil ? [] : retained.filter { angle.isConsistent(id: $0) }
+        // 1. Reuse the motion search's correspondences; each corner is tracked only once per frame. While the
+        //    body turns, its rim moves at ω·R even when its inner points are still: nearby motion is its own.
+        let rimSpeed = abs(angle.lastDelta) / dt * Double(tracks.imageRadius(aroundX: marker.x, y: marker.y))
+        let bodyMoving = axis != nil && rimSpeed > Double(locator.movingSpeed) / 2
         let selected = locator.selected(
-            around: marker, retaining: retained, vouched: vouched, limit: config.targetTrackCount)
+            around: marker, retaining: tracks.ids, bodyMoving: bodyMoving, limit: config.targetTrackCount)
         diagnostics?.value.selectedTrackIDs = selected.map { $0.id }
         if !locator.motionValid {
             restartCalibration(cause: "cameraMotionVeto")
@@ -336,10 +338,9 @@ public final class RotationEngine {
         out.state = state
         out.marker = marker
         out.axis = axis ?? displayedAxis
-        // Confirmed axis and a healthy measurement now. An occluder that hides the points for a moment does not
-        // question the axis: the flag drops while the angle is held and returns with the first healthy frame.
-        out.axisStable =
-            axis != nil && state == .locked && geometryHealthy && stability.isStable(required: config.lockedDriftFrames)
+        // A statement about the axis alone: confirmed by fresh estimates and not contradicted by recent chords.
+        // How well the angle is measured right now is the ray's business (`angleConfidence`), not the axis's.
+        out.axisStable = axis != nil && state == .locked && stability.isStable(required: config.lockedDriftFrames)
         out.angleMeasured = angleOk
         out.axisGeneration = axisGeneration
         out.theta = angle.theta

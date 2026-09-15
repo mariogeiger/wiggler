@@ -145,7 +145,8 @@ public struct EngineOutput {
     /// Angle in degrees in [0, 360).
     public var angleDegrees: Double = 0
     public var angleConfidence: Double = 0
-    /// Fresh, consistent geometry with a stationary camera and a measured angle.
+    /// The axis is confirmed by fresh, consistent estimates and not contradicted by recent chords. Says nothing
+    /// about the current angle measurement: see `angleConfidence` and `angleMeasured`.
     public var axisStable = false
     /// The angle was measured from tracked points this frame (otherwise it is held).
     public var angleMeasured = false
@@ -181,6 +182,9 @@ public struct EngineOutput {
 
 public struct EngineConfig: Codable {
     public var targetTrackCount = 160
+    /// Corners tracked beyond the measurement tracks, spread over the whole image, to notice a moving body
+    /// anywhere; each costs one KLT solve per frame.
+    public var explorationPoints = 80
     public var pyramidLevels = 4
     public var maxResidual: Float = 0.12
     public var minDepthConfidence: UInt8 = 1
@@ -201,8 +205,9 @@ public struct EngineConfig: Codable {
     /// A track whose depth jumps by more than this fraction between consecutive samples is on a depth edge
     /// (LiDAR bleeding from the background): the sample is skipped.
     public var maxDepthJumpFraction = 0.08
-    /// Points below which the geometric angle is not considered a measurement of the object.
-    public var minHealthyInliers = 20
+    /// Points below which the geometric angle is not considered a measurement of the object. With a dozen
+    /// agreeing points the angle's dispersion is still a few degrees; fewer survive an acceleration burst.
+    public var minHealthyInliers = 12
     /// The library is rebuilt when a strong appearance match has contradicted a healthy geometry for this long.
     public var staleLibrarySeconds = 2.0
     public var relocRefreshAlpha: Float = 0.05

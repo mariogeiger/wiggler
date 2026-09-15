@@ -29,13 +29,13 @@ final class MotionSelectionTests: XCTestCase {
         left.background = []
         right.background = []
         var rng = LCG(seed: 31)
-        var config = EngineConfig()
+        var config = EngineConfig.synthetic
         config.roiRadiusFraction = roiRadiusFraction
         let engine = RotationEngine(config: config)
         var leftTheta = 0.0, rightTheta = 0.0
         var before = EngineOutput(), after = EngineOutput()
-        for f in 0..<360 {
-            if f < 150 { leftTheta += 0.04 } else { rightTheta += 0.04 }
+        for f in 0..<200 {
+            if f < 90 { leftTheta += 0.08 } else { rightTheta += 0.08 }
             var input = left.render(theta: leftTheta, depthNoise: 0, rng: &rng)
             let other = right.render(theta: rightTheta, depthNoise: 0, rng: &rng)
             // Both images have the same pixel axes. Subtract the common 0.5 background once.
@@ -47,8 +47,8 @@ final class MotionSelectionTests: XCTestCase {
             let output = engine.process(input)
             XCTAssertNil(output.axis)
             XCTAssertLessThanOrEqual(output.trackCount, config.targetTrackCount)
-            if f == 149 { before = output }
-            if f == 359 { after = output }
+            if f == 89 { before = output }
+            if f == 199 { after = output }
         }
         return (before, after)
     }
@@ -56,7 +56,7 @@ final class MotionSelectionTests: XCTestCase {
     func testPausePreservesPointsAndBudgetReductionIsImmediate() {
         let scene = SyntheticScene()
         var rng = LCG(seed: 33)
-        let engine = RotationEngine()
+        let engine = RotationEngine(config: .synthetic)
         var theta = 0.0
         var paused: [(Float, Float)] = []
         var markerAtPause: Marker?
@@ -90,21 +90,21 @@ final class MotionSelectionTests: XCTestCase {
     func testSlowResumeKeepsRotationConsistentTracks() {
         let scene = SyntheticScene()
         var rng = LCG(seed: 37)
-        let engine = RotationEngine()
+        let engine = RotationEngine(config: .synthetic)
         var theta = 0.0
         var countAtPause = 0
         var minimumWhileResuming = Int.max
-        for f in 0..<620 {
-            if f < 400 { theta += 0.04 } else if f >= 490 { theta += 0.0017 }  // rim ≈ 8 px/s, median point ≈ 6
+        for f in 0..<420 {
+            if f < 200 { theta += 0.08 } else if f >= 290 { theta += 0.0017 }  // rim ≈ 8 px/s, median point ≈ 6
             var input = scene.render(theta: theta, depthNoise: 0, rng: &rng)
             input.timestamp = Double(f) / 60
             let output = engine.process(input)
-            if f == 399 { XCTAssertTrue(output.axisStable, "did not lock before the pause") }
-            if f == 489 {
+            if f == 199 { XCTAssertTrue(output.axisStable, "did not lock before the pause") }
+            if f == 289 {
                 countAtPause = output.trackCount
-                XCTAssertGreaterThan(countAtPause, 50)
+                XCTAssertGreaterThan(countAtPause, 30)
             }
-            if f >= 490 {
+            if f >= 290 {
                 XCTAssertEqual(output.state, .locked)
                 minimumWhileResuming = min(minimumWhileResuming, output.trackCount)
             }
@@ -115,7 +115,7 @@ final class MotionSelectionTests: XCTestCase {
     func testMovingCameraAndMissingPoseDoNotActivatePoints() {
         let scene = SyntheticScene()
         var rng = LCG(seed: 35)
-        let engine = RotationEngine()
+        let engine = RotationEngine(config: .synthetic)
         for f in 0..<210 {
             var input = scene.render(theta: Double(f) * 0.04, depthNoise: 0, rng: &rng)
             input.timestamp = Double(f) / 60

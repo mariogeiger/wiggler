@@ -48,11 +48,13 @@ public struct MotionLocator {
     }
 
     /// Returns an established moving region. `retaining` protects measurement tracks during a pause;
-    /// unselected static probes expire so background texture cannot exhaust the search budget.
+    /// unselected static probes expire so background texture cannot exhaust the search budget. `refill`
+    /// names a region whose tracks are running short: fresh corners are detected there every frame, beside
+    /// the existing points, instead of waiting for the rolling search to come round.
     public mutating func add(
         image: GrayImage, prev: Pyramid?, cur: Pyramid, pose: RigidTransform?, dt: Double,
         time: Double, radius: Float, klt: KLTTracker, corners: CornerDetector,
-        retaining: Set<Int> = []
+        retaining: Set<Int> = [], refill: (x: Float, y: Float, radius: Float)? = nil
     ) -> (x: Float, y: Float)? {
         frame += 1
         let w = Float(image.width), h = Float(image.height)
@@ -174,6 +176,11 @@ public struct MotionLocator {
             points.removeAll { !retaining.contains($0.id) && ($0.stillFor >= 0.75 || $0.duration >= 1.5) }
             replenish(image: image, corners: corners)
         }
+        if let refill {
+            detect(
+                in: image, corners: corners, centerX: refill.x, centerY: refill.y, radius: refill.radius,
+                maxCount: min(max(12, maxPoints / 4), maxPoints - points.count), reason: "regionRefill")
+        }
 
         let moving = points.filter { $0.speed > movingSpeed && $0.duration >= 0.1 }
         movingCount = motionValid ? moving.count : 0
@@ -195,28 +202,23 @@ public struct MotionLocator {
 
     /// Existing moving tracks keep their history. Vacancies and static tracks go to the fastest measured
     /// corners in the region. When everything stops, the existing tracks remain; no static corner is activated.
-    /// `vouched` tracks — those the engine finds consistent with the measured rotation — are kept whatever
-    /// their speed: a rigid rotation resuming slowly moves its inner points below any speed threshold long
-    /// after its rim has started, and dropping them would throw away their depth history for nothing.
-    func selected(around marker: Marker, retaining: Set<Int>, vouched: Set<Int> = [], limit: Int) -> [Point] {
+    /// Still tracks give way to nearby motion only while the tracked body itself is not turning
+    /// (`bodyMoving`): a rigid rotation resuming slowly moves its rim past the speed threshold long before its
+    /// inner points, and that motion is the body's own, not another body's.
+    func selected(around marker: Marker, retaining: Set<Int>, bodyMoving: Bool = false, limit: Int) -> [Point] {
         let r2 = marker.radius * marker.radius * 1.3 * 1.3
         let nearby = points.filter {
             let dx = $0.x - marker.x, dy = $0.y - marker.y
             return dx * dx + dy * dy <= r2
         }
         func moving(_ p: Point) -> Bool { motionValid && p.speed > movingSpeed && p.duration >= 0.1 }
-        func rank(_ p: Point) -> Int {
-            if vouched.contains(p.id) || (retaining.contains(p.id) && (!motionValid || p.stillFor < 0.5)) {
-                return 2
-            }
-            return moving(p) ? 1 : 0
+        let foreignMotion = !bodyMoving && nearby.filter { moving($0) }.count >= minMoving
+        func kept(_ p: Point) -> Bool {
+            retaining.contains(p.id) && (!motionValid || p.stillFor < 0.5 || !foreignMotion)
         }
-        let hasMotion = nearby.filter { moving($0) }.count >= minMoving
+        func rank(_ p: Point) -> Int { kept(p) ? 2 : (moving(p) ? 1 : 0) }
         return Array(
-            nearby.filter {
-                vouched.contains($0.id) || moving($0)
-                    || (retaining.contains($0.id) && (!hasMotion || $0.stillFor < 0.5))
-            }.sorted {
+            nearby.filter { kept($0) || moving($0) }.sorted {
                 let a = rank($0), b = rank($1)
                 if a != b { return a > b }
                 if $0.speed != $1.speed { return $0.speed > $1.speed }
@@ -233,18 +235,25 @@ public struct MotionLocator {
             let x = (Float(tile % columns) + 0.5) * tw
             let y = (Float(tile / columns) + 0.5) * th
             tile = (tile + 1) % (columns * rows)
-            let count = min(quota, maxPoints - points.count)
-            guard count > 0 else { continue }
-            let fresh = corners.detect(
-                in: image, centerX: x, centerY: y, radius: radius,
-                exclude: points.map { ($0.x, $0.y) }, maxCount: count)
-            for (x, y) in fresh {
-                points.append(Point(id: nextID, x: x, y: y, previousX: x, previousY: y))
-                diagnostics?.value.pointEvents.append(
-                    .init(
-                        id: nextID, action: "added", reason: "cornerDetected", x: x, y: y))
-                nextID += 1
-            }
+            detect(
+                in: image, corners: corners, centerX: x, centerY: y, radius: radius,
+                maxCount: min(quota, maxPoints - points.count), reason: "cornerDetected")
+        }
+    }
+
+    /// New corners away from every existing point; the existing points are untouched.
+    private mutating func detect(
+        in image: GrayImage, corners: CornerDetector, centerX: Float, centerY: Float, radius: Float,
+        maxCount: Int, reason: String
+    ) {
+        guard maxCount > 0 else { return }
+        let fresh = corners.detect(
+            in: image, centerX: centerX, centerY: centerY, radius: radius,
+            exclude: points.map { ($0.x, $0.y) }, maxCount: maxCount)
+        for (x, y) in fresh {
+            points.append(Point(id: nextID, x: x, y: y, previousX: x, previousY: y))
+            diagnostics?.value.pointEvents.append(.init(id: nextID, action: "added", reason: reason, x: x, y: y))
+            nextID += 1
         }
     }
 

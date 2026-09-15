@@ -69,9 +69,10 @@ pre-commit run --all-files
    If another region becomes active while the first stops, calibration restarts on the new region.
 3. Rotate the object. In the calibrating state, the app collects 3D chords until it finds a well-conditioned
    axis, then waits for a full turn. The axis is green when fresh, consistent estimates have confirmed it and
-   the angle is being measured; it is red while calibrating, while a contradicting estimate stands, or while
-   an occluder hides the points (green again on the first healthy frame). The orange ray rotates with the
-   object when its angle is reliable. The axis is drawn above the harmonic map; only the ray is hidden in that mode.
+   no recent chords contradict it; it is red while calibrating or while a contradiction stands. Its colour says
+   nothing about the current frame: the orange ray carries the angle measurement — it rotates with the object
+   when the angle is reliable and fades or hides (occluder, few points) otherwise. The axis is drawn above the
+   harmonic map; only the ray is hidden in that mode.
    Moving the phone or losing its pose restarts calibration; the last axis stays visible in red meanwhile.
    A displaced object is recognised when the axis estimated from the last 1.5 s of chords alone persistently
    contradicts the current one (single chords carry ~1 cm of LiDAR noise, so no per-chord test can): the old
@@ -163,6 +164,10 @@ PYTHONDONTWRITEBYTECODE=1 uv run --no-project --with numpy python -m unittest di
 ./tools/test-recording      # Linux + Docker + memcap: writer, lossless export, Python readback, app syntax
 ```
 
+The Swift suite runs synthetic scenes through the whole engine; the test target is built with `-O` and the scenes
+use a 40-track budget. `cd WigglerCore && swift test --parallel` finishes in a few seconds on an Apple-silicon Mac
+(about 19 s sequentially).
+
 ## How it works
 
 The algorithms live in `WigglerCore` (pure Swift, without Apple platform-framework dependencies, so they can
@@ -181,7 +186,9 @@ selection. New points are activated by measured speed, not just contrast, even w
 axis is estimated. Existing moving tracks keep their history; stationary tracks give way when there is
 reliable motion nearby. Stopping the object therefore does not empty the tracker. Exploratory points expire
 and are redistributed so a highly textured background cannot exhaust the search budget. The default budget
-is 160 measurement tracks plus 80 exploratory points. The search continues after acquisition, including
+is 160 measurement tracks plus 80 exploratory points. When the measurement tracks fall below half the target
+(an acceleration burst kills them faster than the rolling search replaces them), fresh corners are detected in
+the region every frame, beside the surviving tracks. The search continues after acquisition, including
 during calibration.
 
 ### 2. 3D points (LiDAR + pose)
@@ -272,7 +279,7 @@ the 5th–95th percentiles of consistent tracks.
 | `chordMaxFrames` | 45 | maximum chord time span in frames |
 | `constraintWindowFrames` | 900 | sliding chord window (15 s) |
 | `lockedDriftFrames` | 3 | inconsistent axis estimates before adopting a new axis |
-| `minHealthyInliers` | 20 | minimum point count for healthy geometry |
+| `minHealthyInliers` | 12 | minimum point count for healthy geometry |
 | `staleLibrarySeconds` | 2.0 | disagreement duration before rebuilding the appearance library |
 | `keyframeBins` | 36 | patches per turn (10°) |
 | `reacquisitionDelaySeconds` | 5.0 | delay before searching again after losing the angle |

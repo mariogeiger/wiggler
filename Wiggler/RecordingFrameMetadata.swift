@@ -11,10 +11,13 @@ struct RecordingSettings: Encodable {
     var harmonicInputAccepted = true
     var harmonicTurnProgress = 0.0
     var cameraTrackingState = "unknown"
+    /// Interval since ARKit's previous frame (ms, dropped or not) and the time spent converting this one.
+    var deliveryMillis = 0.0
+    var conversionMillis = 0.0
 
     private enum CodingKeys: String, CodingKey {
         case harmonicSignal, harmonicOrder, harmonicRevision, inputRevision, convertedSignal
-        case harmonicInputAccepted, harmonicTurnProgress, cameraTrackingState
+        case harmonicInputAccepted, harmonicTurnProgress, cameraTrackingState, deliveryMillis, conversionMillis
     }
 
     func encode(to encoder: Encoder) throws {
@@ -27,6 +30,8 @@ struct RecordingSettings: Encodable {
         try container.encode(harmonicInputAccepted, forKey: .harmonicInputAccepted)
         try container.encode(harmonicTurnProgress, forKey: .harmonicTurnProgress)
         try container.encode(cameraTrackingState, forKey: .cameraTrackingState)
+        try container.encode(deliveryMillis, forKey: .deliveryMillis)
+        try container.encode(conversionMillis, forKey: .conversionMillis)
     }
 }
 
