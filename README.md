@@ -71,9 +71,11 @@ pre-commit run --all-files
    axis, then waits for a full turn. The axis is red while uncertain and green after fresh, consistent
    estimates confirm it. The orange ray rotates with the object when its angle is reliable. The axis is
    drawn above the harmonic map; only the ray is hidden in that mode.
-   Moving the phone, losing its pose, or detecting a displaced object axis invalidates the measurement.
-   The last axis stays visible in red while calibration restarts. The harmonic map is discarded on any
-   instability and rebuilt from a new full turn of stable measurements, never resumed from stale pixels.
+   Moving the phone or losing its pose restarts calibration; the last axis stays visible in red meanwhile.
+   A displaced object is recognised when the axis estimated from the last 1.5 s of chords alone persistently
+   contradicts the current one (single chords carry ~1 cm of LiDAR noise, so no per-chord test can): the old
+   chords are dropped and the new axis adopted. The harmonic map belongs to one axis generation — it is
+   discarded when the axis is replaced, and only paused while the angle is held (occluder, tracking lost).
 4. During the first turn after locking, the app learns the object's appearance every 10° (appearance gauge).
    It then continuously aligns the absolute angle with this library and detects the appearance period:
    360° for an arbitrary object, 180°, 120°… or rotational symmetry. For a body of revolution, only the relative
@@ -105,16 +107,32 @@ enough valid angular coverage and a nonsingular fit, or stays transparent. Entir
 the existing fit without adding samples; a changed grid clears it. Depth is disabled on devices without scene-depth support. Recordings include the selected chroma plane
 when it was converted for a processed frame.
 
-## Diagnostic recordings
+## Recordings
 
 Record writes one streamed `.wig` file per session, without restarting the running engine. Version 2 saves
 **every processed frame**, not every ARKit frame: busy-frame drops and conversion failures are cumulative
-per-frame counters. Each frame includes the full active `EngineConfig`, harmonic signal/order and selection
-generations, camera tracking state, inputs, outputs (including `axisStable`), and decision diagnostics.
-Diagnostics include stable point IDs, point/depth selection evidence, chord residuals, stability counters,
-axis estimates, and reset/invalidation events. The first captured frame also describes retained evidence
-from before Record was pressed. This is **not a restorable engine snapshot**: earlier images, the KLT pyramid,
-and appearance/harmonic libraries are absent. `tools/replay.py` is a research pipeline, not an exact Swift replay.
+per-frame counters. Each frame includes the inputs (luma, depth, confidence, converted chroma, pose,
+intrinsics), the full active `EngineConfig`, harmonic signal/order and selection generations, the map's turn
+progress, camera tracking state, and the engine's outputs (including `axisStable`, `axisGeneration`,
+`angleMeasured`, tracked points with status). Recording stops by itself at 100 MiB and opens the share sheet.
+
+The app records no decision journal: serialising it cost more than the engine itself and throttled the engine
+to ~10 fps, so what was recorded was not what runs. The inputs are sufficient — the engine is deterministic —
+and `wigreplay` recomputes the journal offline:
+
+```bash
+cd WigglerCore && swift run -c release wigreplay recording.wig > decisions.jsonl   # --diagnostics for everything
+```
+
+One JSON line per frame: outputs, events (resets, axis adoption), the full-window axis estimate, the
+recent-window test, geometry health. The engine starts cold, so the first calibration differs from the
+app's warm run; afterwards the replay is exact. This is **not a restorable engine snapshot**: earlier images,
+the KLT pyramid, and appearance/harmonic libraries are absent. `tools/replay.py` is a research pipeline,
+not an exact Swift replay.
+
+The writer documents its own cost in every frame: `recorderMillis` (time spent writing the previous frame,
+on its own queue) and `pendingFrames` (frames still queued when this one was appended — nonzero means the
+writer was slower than the engine at that moment; at eight the engine waits).
 
 All chunk lengths are UInt32 little-endian. A JSON header identifies format, app version/build, OS and an
 executable SHA-256 when available; a source revision is explicitly marked as not embedded. Each frame has
@@ -127,8 +145,8 @@ Every nonempty frame chunk starts with a codec byte: raw (0) or raw deflate (1),
 Raw storage is used only when compression fails or would not reduce size. Absent image planes have empty chunks. Float
 planes are little-endian and row-major; signed chroma preserves the converted input exactly. Dimensions
 are per frame. JSON nonfinite numbers use `NaN`, `+Infinity`, `-Infinity` strings; float planes retain IEEE 754.
-The writer holds at most eight pending frames and waits rather than dropping processed inputs. Compression
-and diagnostics have a cost and may lower capture rate; the recorded timestamps and drop counters expose it.
+The writer holds at most eight pending frames and waits rather than dropping processed inputs; the recorded
+timestamps, drop counters and `pendingFrames` expose any slowdown.
 Write failures are shown, not silently replaced with empty metadata. Export verifies each recompressed
 chunk byte-for-byte and writes one chunk at a time to a temporary file beside the original. Only a complete,
 smaller, synced file replaces the original atomically. An export failure keeps the original and shows an

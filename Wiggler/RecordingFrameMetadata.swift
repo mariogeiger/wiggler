@@ -40,6 +40,9 @@ struct RecordingFrameMetadata: Encodable {
     let droppedFrames: Int
     let conversionFailures: Int
     let processedFps: Double
+    /// Writer time of the previous frame (ms) and frames still queued when this one was appended.
+    var recorderMillis = 0.0
+    var pendingFrames = 0
 
     private struct Track: Encodable {
         let x: Float
@@ -69,6 +72,8 @@ struct RecordingFrameMetadata: Encodable {
         case angleDegrees
         case angleConfidence
         case axisStable
+        case axisGeneration
+        case angleMeasured
         case axisQuality
         case rpm
         case trackCount
@@ -94,6 +99,8 @@ struct RecordingFrameMetadata: Encodable {
         case droppedFrames
         case conversionFailures
         case processedFps
+        case recorderMillis
+        case pendingFrames
         case diagnostics
         case marker
         case axisOrigin
@@ -124,6 +131,8 @@ struct RecordingFrameMetadata: Encodable {
         try container.encode(output.angleDegrees, forKey: .angleDegrees)
         try container.encode(output.angleConfidence, forKey: .angleConfidence)
         try container.encode(output.axisStable, forKey: .axisStable)
+        try container.encode(output.axisGeneration, forKey: .axisGeneration)
+        try container.encode(output.angleMeasured, forKey: .angleMeasured)
         try container.encode(output.axisQuality, forKey: .axisQuality)
         try container.encode(output.rpm, forKey: .rpm)
         try container.encode(output.trackCount, forKey: .trackCount)
@@ -150,7 +159,9 @@ struct RecordingFrameMetadata: Encodable {
         try container.encode(droppedFrames, forKey: .droppedFrames)
         try container.encode(conversionFailures, forKey: .conversionFailures)
         try container.encode(processedFps, forKey: .processedFps)
-        try container.encode(output.diagnostics, forKey: .diagnostics)
+        try container.encode(recorderMillis, forKey: .recorderMillis)
+        try container.encode(pendingFrames, forKey: .pendingFrames)
+        try container.encodeIfPresent(output.diagnostics, forKey: .diagnostics)
         if let marker = output.marker {
             try container.encode([marker.x, marker.y], forKey: .marker)
         }

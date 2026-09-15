@@ -5,9 +5,13 @@ import WigglerCore
     import CryptoKit
 #endif
 
-/// Streams every processed input and its decision evidence to one file. Public calls belong on the engine queue.
+/// Streams every processed input and the engine's outputs to one file. Public calls belong on the engine queue.
 /// Version 2: length-prefixed JSON header, then metadata and five image chunks per frame.
 /// Each nonempty frame chunk starts with a codec byte (0 raw, 1 raw deflate). Numbers in planes are little-endian.
+///
+/// The writer runs on its own queue and documents its own cost in every frame (`recorderMillis`,
+/// `pendingFrames`), so a recording shows whether it slowed the engine. Recording stops by itself at
+/// `byteLimit`.
 final class SessionRecorder {
     private let queue = DispatchQueue(label: "ch.mariogeiger.wiggler.recorder", qos: .utility)
     private let slots = DispatchSemaphore(value: 8)
@@ -15,6 +19,8 @@ final class SessionRecorder {
     private let directory: URL
     /// Set before starting capture. Called on the writer queue on the first failure.
     var onFailure: ((String) -> Void)?
+    /// The file is closed once its size reaches this many bytes.
+    var byteLimit = 100 * 1_048_576
     // Writer queue only.
     private var handle: FileHandle?
     // Engine queue only.
@@ -23,6 +29,9 @@ final class SessionRecorder {
     private var sequence = 0
     // Protected by lock.
     private var snapshot = Status()
+    private var bytes = 0
+    private var pending = 0
+    private var lastWriteMillis = 0.0
 
     struct Status {
         var recording = false
@@ -31,6 +40,8 @@ final class SessionRecorder {
         var frames = 0
         var fileName = ""
         var error: String?
+        /// The recording stopped by itself at `byteLimit`.
+        var limitReached = false
     }
 
     init(directory: URL = SessionRecorder.documentsDirectory) { self.directory = directory }
@@ -75,6 +86,9 @@ final class SessionRecorder {
         startTime = nil
         lock.lock()
         snapshot = Status()
+        bytes = 0
+        pending = 0
+        lastWriteMillis = 0
         lock.unlock()
         let f = DateFormatter()
         f.dateFormat = "yyyyMMdd-HHmmss"
@@ -91,11 +105,15 @@ final class SessionRecorder {
                 "chromaRed": "float32-le", "chromaBlue": "float32-le",
             ],
             "capture": "every processed frame; ARKit frames skipped while busy are counted",
-            "initialState": "warm; first diagnostics.before describes the existing engine, not a restorable snapshot",
+            "initialState": "warm: the engine was running before the first frame; no restorable snapshot",
+            "decisions":
+                "inputs and outputs only; replay the frames through RotationEngine (wigreplay) for the decision journal",
             "replayLimitations":
                 "No pre-recording images, KLT pyramid, or appearance/harmonic library snapshot",
             "nonFiniteNumbers": "NaN, +Infinity, -Infinity strings in JSON; IEEE 754 in float planes",
             "maximumPendingFrames": 8, "backpressure": "wait; never discard a processed frame",
+            "writerCost": "recorderMillis = writer time of the previous frame; pendingFrames = frames queued at append",
+            "byteLimit": byteLimit,
             "build": Self.buildIdentity(), "context": context,
         ]
         queue.sync {
@@ -125,22 +143,43 @@ final class SessionRecorder {
     }
 
     /// The eight-frame bound applies backpressure instead of growing memory or silently losing evidence.
+    /// Returns false once the file has reached `byteLimit`: the recording is then closed.
+    @discardableResult
     func append(
         input: FrameInput, luma8: [UInt8], output: EngineOutput, config: EngineConfig,
         settings: RecordingSettings, droppedFrames: Int, conversionFailures: Int, processedFps: Double
-    ) {
-        guard isRecording else { return }
+    ) -> Bool {
+        guard isRecording else { return false }
         if startTime == nil { startTime = input.timestamp }
+        lock.lock()
+        let full = bytes >= byteLimit
+        if full { snapshot.limitReached = true }
+        let queued = pending
+        let writeMillis = lastWriteMillis
+        if !full { pending += 1 }
+        lock.unlock()
+        if full {
+            stop()
+            return false
+        }
         let index = sequence
         sequence += 1
         slots.wait()
         queue.async { [self] in
-            defer { slots.signal() }
+            let started = Date()
+            defer {
+                lock.lock()
+                pending -= 1
+                lastWriteMillis = Date().timeIntervalSince(started) * 1000
+                lock.unlock()
+                slots.signal()
+            }
             guard handle != nil else { return }
             do {
                 let meta = RecordingFrameMetadata(
                     input: input, output: output, config: config, settings: settings, sequence: index,
-                    droppedFrames: droppedFrames, conversionFailures: conversionFailures, processedFps: processedFps)
+                    droppedFrames: droppedFrames, conversionFailures: conversionFailures, processedFps: processedFps,
+                    recorderMillis: writeMillis, pendingFrames: queued)
                 let encoder = JSONEncoder()
                 encoder.nonConformingFloatEncodingStrategy = .convertToString(
                     positiveInfinity: "+Infinity", negativeInfinity: "-Infinity", nan: "NaN")
@@ -156,6 +195,7 @@ final class SessionRecorder {
                 lock.unlock()
             } catch { fail(error) }
         }
+        return true
     }
 
     private static func jsonData(_ value: [String: Any]) throws -> Data {
@@ -198,7 +238,8 @@ final class SessionRecorder {
         try handle.write(contentsOf: Data(bytes: &length, count: 4))
         try handle.write(contentsOf: data)
         lock.lock()
-        snapshot.megabytes += Double(4 + data.count) / 1_048_576
+        bytes += 4 + data.count
+        snapshot.megabytes = Double(bytes) / 1_048_576
         lock.unlock()
     }
 

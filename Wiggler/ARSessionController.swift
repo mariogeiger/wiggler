@@ -169,29 +169,39 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
         preparingRecordingShare = true
         let deviceModel = UIDevice.current.model
         engineQueue.async { [self] in
-            let stopping = recorder.isRecording
-            if stopping {
+            if recorder.isRecording {
                 recorder.stop()
-            } else {
-                recorder.start(
-                    width: FrameConverter.engineWidth, height: FrameConverter.engineHeight,
-                    context: [
-                        "deviceModel": deviceModel,
-                        "harmonicOrders": Self.harmonicOrders,
-                        "posePolicy": "normal and limited(excessiveMotion/insufficientFeatures) accepted",
-                    ])
-                if recorder.isRecording { engine.beginDiagnosticCapture() }
+                finishRecording()
+                return
             }
+            recorder.start(
+                width: FrameConverter.engineWidth, height: FrameConverter.engineHeight,
+                context: [
+                    "deviceModel": deviceModel,
+                    "harmonicOrders": Self.harmonicOrders,
+                    "posePolicy": "normal and limited(excessiveMotion/insufficientFeatures) accepted",
+                ])
             let status = recorder.status(now: lastProcessedTimestamp ?? 0)
-            let shareURL = stopping && status.error == nil ? recorder.url : nil
             DispatchQueue.main.async { [weak self] in
                 self?.recorderStatus = status
                 self?.recordingError = status.error
-                if let shareURL {
-                    self?.compressAndShare(at: shareURL)
-                } else {
-                    self?.preparingRecordingShare = false
-                }
+                self?.preparingRecordingShare = false
+            }
+        }
+    }
+
+    /// Engine queue, after the recorder has closed its file (by the button or by its byte limit): export it.
+    private func finishRecording() {
+        let status = recorder.status(now: lastProcessedTimestamp ?? 0)
+        let shareURL = status.error == nil ? recorder.url : nil
+        DispatchQueue.main.async { [weak self] in
+            self?.recorderStatus = status
+            self?.recordingError = status.error
+            if let shareURL {
+                self?.preparingRecordingShare = true
+                self?.compressAndShare(at: shareURL)
+            } else {
+                self?.preparingRecordingShare = false
             }
         }
     }
@@ -282,7 +292,7 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
             }
             lastProcessedTimestamp = input.timestamp
             let recording = recorder.isRecording
-            let out = engine.process(input, captureDiagnostics: recording)
+            let out = engine.process(input)
             updateHarmonics(input: inputRevision == harmonicRevisionEngine ? input : nil, output: out)
             lock.lock()
             latestOutput = out
@@ -293,7 +303,7 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
             engineBusy = false
             lock.unlock()
             if recording {
-                recorder.append(
+                let appended = recorder.append(
                     input: input, luma8: luma8, output: out, config: engine.config,
                     settings: RecordingSettings(
                         harmonicSignal: harmonics.signal.rawValue, harmonicOrder: harmonicOrderEngine,
@@ -302,6 +312,7 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
                         harmonicInputAccepted: inputRevision == harmonicRevisionEngine,
                         harmonicTurnProgress: harmonics.turnProgress, cameraTrackingState: cameraTrackingState),
                     droppedFrames: dropped, conversionFailures: failedConversions, processedFps: processedFps)
+                if !appended { finishRecording() }
             }
             let now = Date()
             if now.timeIntervalSince(lastPublish) > 1.0 / 30.0 {
