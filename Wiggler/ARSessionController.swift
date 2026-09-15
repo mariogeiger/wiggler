@@ -80,8 +80,7 @@ final class ARSessionController: NSObject, ObservableObject, ARSessionDelegate, 
         sceneView.automaticallyUpdatesLighting = true
         sceneView.rendersContinuously = true
         sceneView.preferredFramesPerSecond = 60
-        sceneView.scene.rootNode.addChildNode(harmonicOverlay)
-        sceneView.scene.rootNode.addChildNode(overlay)
+        sceneView.scene.rootNode.addChildNode(overlay)  // the harmonic overlay attaches itself to the camera
         overlay.isHidden = true
         let saved = UserDefaults.standard.integer(forKey: Self.trackCountKey)
         if saved != 0 { targetTrackCount = Self.clampTrackCount(saved) }

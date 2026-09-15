@@ -2,12 +2,16 @@ import CZlib
 import Foundation
 import WigglerCore
 
-// wigreplay <recording.wig> [--diagnostics]
+// wigreplay <recording.wig> [--diagnostics] [--harmonic <order> <rgba.bin>]
 //
 // Feeds every recorded frame to a fresh RotationEngine and prints one JSON line per frame: the engine's
 // outputs plus the decisions the app does not record (events, axis estimation, recent-axis test). With
 // `--diagnostics` the complete EngineDiagnostics of every frame is printed instead. The engine starts cold,
 // so the first seconds differ from the app's warm run; everything after the first calibration is exact.
+//
+// `--harmonic` instead drives the app's HarmonicFit with the recorded luma and the *recorded* outputs (state,
+// θ, angleMeasured, axisGeneration), exactly as the app fed it, and appends every rendered overlay
+// (premultiplied RGBA8, width × height × 4 bytes, one per frame with a map) to the given file.
 
 struct Failure: Error, CustomStringConvertible {
     let description: String
@@ -72,6 +76,9 @@ struct FrameMeta: Decodable {
     var depthWidth: Int, depthHeight: Int
     var chromaRedWidth: Int, chromaRedHeight: Int, chromaBlueWidth: Int, chromaBlueHeight: Int
     var state: String
+    var theta: Double
+    var angleMeasured: Bool?
+    var axisGeneration: Int?
 }
 
 /// The recorded configuration, when it still matches the engine's; otherwise the defaults are used.
@@ -100,6 +107,14 @@ guard arguments.count >= 2 else {
     exit(2)
 }
 let full = arguments.contains("--diagnostics")
+var harmonicOrder: Int?
+var harmonicOutput: FileHandle?
+if let i = arguments.firstIndex(of: "--harmonic"), i + 2 < arguments.count, let order = Int(arguments[i + 1]) {
+    harmonicOrder = order
+    FileManager.default.createFile(atPath: arguments[i + 2], contents: nil)
+    harmonicOutput = FileHandle(forWritingAtPath: arguments[i + 2])
+}
+var fit = HarmonicFit(signal: .luma, orders: [1, 2, 3])
 let reader = try ChunkReader(path: arguments[1])
 let decoder = JSONDecoder()
 decoder.nonConformingFloatDecodingStrategy = .convertFromString(
@@ -151,6 +166,21 @@ while let metaData = try reader.next() {
         poseValid: meta.poseValid, depth: depth, timestamp: meta.t,
         chromaRed: plane(chromaRed, width: meta.chromaRedWidth, height: meta.chromaRedHeight),
         chromaBlue: plane(chromaBlue, width: meta.chromaBlueWidth, height: meta.chromaBlueHeight))
+    if let order = harmonicOrder {
+        var recorded = EngineOutput()
+        recorded.state = EngineState(rawValue: meta.state) ?? .idle
+        recorded.theta = meta.theta
+        recorded.angleMeasured = meta.angleMeasured ?? true
+        recorded.axisGeneration = meta.axisGeneration ?? 0
+        fit.update(frame: input, output: recorded)
+        if let map = fit.map, let rgba = map.render(order: order, theta: meta.theta, fullScale: 20 / 255) {
+            harmonicOutput?.write(Data(rgba))
+            print("\(meta.t) rendered")
+        } else {
+            print("\(meta.t) no map (progress \(fit.turnProgress))")
+        }
+        continue
+    }
     let out = engine.process(input, captureDiagnostics: true)
     let d = out.diagnostics!
     if full {
