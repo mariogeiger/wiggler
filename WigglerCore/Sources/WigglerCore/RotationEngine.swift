@@ -40,6 +40,7 @@ public final class RotationEngine {
     private var lastInlierCount = 0
     private var lastDispersion = 0.0
     private var lastAngleOk = false
+    private var axisGeneration = 0
 
     public init(config: EngineConfig = EngineConfig()) {
         self.config = config
@@ -68,6 +69,7 @@ public final class RotationEngine {
     }
 
     private func resetMeasurement() {
+        axisGeneration += 1
         tracks.removeAll(diagnostics: diagnostics)
         displayedAxis = nil
         estimator.removeAll()
@@ -186,16 +188,7 @@ public final class RotationEngine {
         let chords = tracks.chordConstraints(
             frame: frameIndex, minLength: dmin,
             maxFrames: config.chordMaxFrames, stride: config.chordStride, diagnostics: diagnostics)
-        if let ax = axis,
-            stability.observe(
-                chords: chords, axis: ax, tolerance: config.axisMotionToleranceMeters,
-                required: config.lockedDriftFrames, diagnostics: diagnostics)
-        {
-            restartCalibration(cause: "freshChordContradictions")
-            tracks.update(selected, diagnostics: diagnostics)
-        } else {
-            for chord in chords { estimator.add(chord) }
-        }
+        for chord in chords { estimator.add(chord) }
         estimator.prune(before: frameIndex - config.constraintWindowFrames)
 
         // 4. Angle.
@@ -266,7 +259,8 @@ public final class RotationEngine {
             if let est = estimate, est.isWellConditioned {
                 lastEstimate = est
                 let consistent =
-                    axis.map { AxisStability.agrees(est.axis, with: $0, objectRadius: objectRadius) } ?? false
+                    axis.map { AxisStability.agrees(est.axis, with: $0, within: consistencyDistance(objectRadius)) }
+                    ?? false
                 diagnostics?.value.axisEstimation?.consistent = consistent
                 updateAxis(with: est, objectRadius: objectRadius)
                 stability.observe(frame: evidenceFrame, consistent: consistent)
@@ -275,6 +269,28 @@ public final class RotationEngine {
                     action: "invalidateStability",
                     cause: estimate == nil ? "axisEstimateUnavailable" : "axisEstimateIllConditioned")
                 stability.invalidate()
+            }
+            // Has the object moved? Only the recent chords can say so before the old ones are outvoted.
+            if let ax = axis {
+                let since = frameIndex - config.recentWindowFrames
+                let recent = estimator.estimate(newerThan: since)
+                let distance = max(config.axisMovedMeters, 0.2 * objectRadius)
+                let moved = stability.observe(
+                    recent: recent, axis: ax, within: distance, required: config.lockedDriftFrames)
+                diagnostics?.value.recentAxis = .init(
+                    sinceFrame: since, estimate: recent.map { .init($0) }, distanceLimit: distance,
+                    agrees: recent.map { AxisStability.agrees($0.axis, with: ax, within: distance) },
+                    contradictions: stability.contradictions, moved: moved)
+                if moved, let recent {
+                    let far =
+                        !AxisStability.agrees(recent.axis, with: ax, within: max(0.15, 3 * objectRadius))
+                        || acos(min(1, abs(recent.axis.direction.dot(ax.direction)))) > 25 * .pi / 180
+                    if far {
+                        restartCalibration(cause: "recentAxisFar")
+                    } else {
+                        adopt(recent.axis, since: since, cause: "recentAxisMoved")
+                    }
+                }
             }
         }
         if !geometryHealthy || !locator.motionValid {
@@ -322,6 +338,8 @@ public final class RotationEngine {
         out.marker = marker
         out.axis = axis ?? displayedAxis
         out.axisStable = axis != nil && state == .locked && stability.isStable(required: config.lockedDriftFrames)
+        out.angleMeasured = angleOk
+        out.axisGeneration = axisGeneration
         out.theta = angle.theta
         out.angleDegrees = positiveAngle(angle.theta) * 180 / .pi
         out.rpm = rpmFiltered
@@ -369,6 +387,24 @@ public final class RotationEngine {
         return tracks.objectRadius
     }
 
+    /// How far a full-window estimate may sit from the axis it refines (it lags a moved object).
+    private func consistencyDistance(_ objectRadius: Double) -> Double { max(0.05, 0.5 * objectRadius) }
+
+    /// The object was displaced a little (chair rolled, axis re-estimated more precisely): take the new axis,
+    /// keep the angle continuous, and forget the chords of the old one. Everything built on the old geometry
+    /// — appearance library, fusion, harmonic maps — starts over.
+    private func adopt(_ newAxis: Axis, since frame: Int, cause: String) {
+        guard let old = axis else { return }
+        recordEvent(action: "adoptAxis", cause: cause)
+        estimator.prune(before: frame + 1)
+        blend(into: old, target: newAxis.alignedSign(with: old.direction), alpha: 1)
+        stability.reset()
+        inconsistentAxisCount = 0
+        axisGeneration += 1
+        reloc.reset()
+        fusion.reset()
+    }
+
     private func updateAxis(with est: AxisEstimate, objectRadius: Double) {
         var newAxis = est.axis
         if let old = axis {
@@ -378,7 +414,7 @@ public final class RotationEngine {
             let d = newAxis.origin - old.origin
             let perp = d - old.direction * d.dot(old.direction)
             let lineDistance = perp.length
-            let consistent = AxisStability.agrees(newAxis, with: old, objectRadius: objectRadius)
+            let consistent = AxisStability.agrees(newAxis, with: old, within: consistencyDistance(objectRadius))
             diagnostics?.value.axisEstimation?.angleBetween = angleBetween
             diagnostics?.value.axisEstimation?.lineDistance = lineDistance
             if state == .calibrating {
@@ -401,13 +437,8 @@ public final class RotationEngine {
                         diagnostics?.value.axisEstimation?.action = "farAxisRestart"
                         restartCalibration(cause: "farAxisEstimate")
                     } else {
-                        // Semi-static drift (chair rolled a little, axis re-estimated more precisely): adopt the new
-                        // axis while keeping the angle continuous; the appearance library is rebuilt.
                         diagnostics?.value.axisEstimation?.action = "driftAdopted"
-                        blend(into: old, target: newAxis, alpha: 0.7)
-                        recordEvent(action: "resetAppearanceAndFusion", cause: "axisDriftAdopted")
-                        reloc.reset()
-                        fusion.reset()
+                        adopt(newAxis, since: frameIndex - config.recentWindowFrames, cause: "fullAxisDrift")
                     }
                 }
             }
@@ -533,7 +564,8 @@ extension RotationEngine {
         .init(
             state: state, axis: axis, displayedAxis: displayedAxis, marker: marker.map { [$0.x, $0.y] },
             confirmations: stability.confirmations, newestEvidenceFrame: stability.newestFrame,
-            inconsistentBatches: stability.inconsistentBatches, inconsistentAxisCount: inconsistentAxisCount,
+            contradictions: stability.contradictions, inconsistentAxisCount: inconsistentAxisCount,
+            axisGeneration: axisGeneration,
             calibrationStartFrame: calibrationStartFrame, theta: angle.theta, lastDelta: angle.lastDelta,
             thetaMin: thetaMin, thetaMax: thetaMax, lastAngleOkFrame: lastAngleOkFrame, lastRelocFrame: lastRelocFrame,
             lastAngleOk: lastAngleOk, inlierCount: lastInlierCount, dispersion: lastDispersion,

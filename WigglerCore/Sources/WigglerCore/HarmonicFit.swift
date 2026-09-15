@@ -1,4 +1,4 @@
-/// A single fit whose history belongs to one signal, pixel grid and stable angle reference.
+/// A single fit whose history belongs to one signal, pixel grid and axis generation.
 public struct HarmonicFit {
     public private(set) var signal: HarmonicSignal
     public private(set) var map: HarmonicMap?
@@ -18,8 +18,8 @@ public struct HarmonicFit {
     }
 
     public mutating func update(frame: FrameInput?, output: EngineOutput) {
-        guard output.axisStable, output.state == .locked else {
-            map = nil
+        guard output.state == .locked else {
+            if output.state != .lost { map = nil }
             return
         }
         let observation =

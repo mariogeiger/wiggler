@@ -26,6 +26,8 @@ public struct HarmonicMap {
     /// Per-pixel right-hand sides Σ w I φ: `terms` planes of width × height, in basis order.
     private var acc: [Float]
     private var thetaPrev: Double?
+    /// The engine's axis generation the accumulation refers to.
+    private var generation: Int?
 
     public init(width: Int, height: Int, orders: [Int] = [1], windowTurns: Double = 3) {
         precondition(width > 0 && height > 0 && windowTurns > 0 && windowTurns.isFinite)
@@ -53,12 +55,14 @@ public struct HarmonicMap {
     public var hasFullTurn: Bool { turnProgress >= 1 }
     private var fullTurnWeight: Double { window * (1 - exp(-2 * .pi / window)) }
 
-    /// Accumulate only a stable measurement. Invalidation discards both the fit and the angle reference.
+    /// Accumulate measured angles of one axis generation: a replaced axis or angle reference discards the fit;
+    /// a held angle (occluder, tracking lost) only pauses it.
     public mutating func update(image: GrayImage, output: EngineOutput) {
-        guard output.axisStable && output.state == .locked else {
-            if thetaPrev != nil { reset() }
-            return
+        if generation != output.axisGeneration {
+            reset()
+            generation = output.axisGeneration
         }
+        guard output.state == .locked && output.angleMeasured else { return }
         add(image: image, theta: output.theta)
     }
 

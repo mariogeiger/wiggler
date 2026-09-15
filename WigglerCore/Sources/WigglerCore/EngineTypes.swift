@@ -147,6 +147,11 @@ public struct EngineOutput {
     public var angleConfidence: Double = 0
     /// Fresh, consistent geometry with a stationary camera and a measured angle.
     public var axisStable = false
+    /// The angle was measured from tracked points this frame (otherwise it is held).
+    public var angleMeasured = false
+    /// Counts replacements of the axis or of the angle reference: anything accumulated under an earlier
+    /// generation (a harmonic map) no longer refers to the current geometry.
+    public var axisGeneration = 0
     public var axisQuality: Double = 0
     public var rpm: Double = 0
     /// Appearance period in degrees (360 asymmetric, 180 two-fold, … ; 0 = rotationally symmetric / unknown).
@@ -185,10 +190,14 @@ public struct EngineConfig: Codable {
     public var axisUpdateInterval = 10
     public var constraintWindowFrames = 900
     public var sampleHistory = 90
-    public var lockedDriftFrames = 3  // consecutive inconsistent axis estimates before adopting the new axis
+    /// Consecutive contradicting axis estimates (one per `axisUpdateInterval`) before the axis is replaced.
+    public var lockedDriftFrames = 3
     public var axisConstraintCapacity = 24000
-    /// Median circular-trajectory error above which fresh points invalidate the axis (meters).
-    public var axisMotionToleranceMeters = 0.01
+    /// The axis is also estimated from the chords of the last `recentWindowFrames` alone. When that estimate is
+    /// well conditioned and lies persistently farther than max(`axisMovedMeters`, 0.2 × object radius) or 12°
+    /// from the current axis, the object was moved: the old chords are dropped and the recent axis adopted.
+    public var recentWindowFrames = 45
+    public var axisMovedMeters = 0.02
     /// A track whose depth jumps by more than this fraction between consecutive samples is on a depth edge
     /// (LiDAR bleeding from the background): the sample is skipped.
     public var maxDepthJumpFraction = 0.08

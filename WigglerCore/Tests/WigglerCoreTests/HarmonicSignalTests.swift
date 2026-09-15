@@ -15,7 +15,7 @@ final class HarmonicSignalTests: XCTestCase {
     private func stable(theta: Double) -> EngineOutput {
         var output = EngineOutput()
         output.state = .locked
-        output.axisStable = true
+        output.angleMeasured = true
         output.theta = theta
         return output
     }
@@ -107,9 +107,16 @@ final class HarmonicSignalTests: XCTestCase {
         XCTAssertEqual(fit.turnProgress, progress * exp(-0.15 / fit.map!.window), accuracy: 1e-12)
         fit.update(frame: frame(), output: stable(theta: 0.3))
         XCTAssertGreaterThan(fit.turnProgress, progress)
-        var uncertain = stable(theta: 0.4)
-        uncertain.axisStable = false
-        fit.update(frame: nil, output: uncertain)
+        var held = stable(theta: 0.4)
+        held.angleMeasured = false
+        fit.update(frame: nil, output: held)
+        XCTAssertNotNil(fit.map, "a held angle pauses the fit")
+        var replaced = stable(theta: 0.4)
+        replaced.axisGeneration += 1
+        fit.update(frame: nil, output: replaced)
+        XCTAssertEqual(fit.turnProgress, 0, "a new axis generation discards the fit")
+        replaced.state = .calibrating
+        fit.update(frame: nil, output: replaced)
         XCTAssertNil(fit.map)
         fit.select(.depth)
         fit.update(frame: frame(), output: stable(theta: 0.5))

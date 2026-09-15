@@ -24,7 +24,7 @@ public struct EngineDiagnostics: Codable {
     public var depthSamplingSkipped: String?
     public var chordMinLengthMeters: Double?
     public var freshChords: [FreshChord] = []
-    public var chordBatch: ChordBatch?
+    public var recentAxis: RecentAxis?
     public var axisEstimation: AxisEstimation?
     public var geometry: GeometryDecision?
     public var relocalization: Relocalization?
@@ -38,8 +38,9 @@ public struct EngineDiagnostics: Codable {
         public var marker: [Float]?
         public var confirmations: Int
         public var newestEvidenceFrame: Int
-        public var inconsistentBatches: Int
+        public var contradictions: Int
         public var inconsistentAxisCount: Int
+        public var axisGeneration: Int
         public var calibrationStartFrame: Int
         public var theta: Double
         public var lastDelta: Double
@@ -242,28 +243,16 @@ public struct EngineDiagnostics: Codable {
         public var constraint: ChordConstraint
     }
 
-    public struct ChordResidual: Codable {
-        public var trackID: Int?
-        public var tiltMeters: Double
-        public var offsetMeters: Double
-        public var residualMeters: Double
-        public var exceedsTolerance: Bool
-    }
-
-    public struct ChordBatch: Codable {
-        public var axis: Axis
-        public var toleranceMeters: Double
-        public var minimumCount = 8
-        public var requiredBatches: Int
-        public var count: Int
-        public var badCount: Int
-        public var rejects: Bool
-        public var residuals: [ChordResidual]
-        public var confirmationsBefore: Int
-        public var confirmationsAfter: Int
-        public var inconsistentBefore: Int
-        public var inconsistentAfter: Int
-        public var restartRequired: Bool
+    /// The axis estimated from the recent chords alone, compared with the current axis.
+    public struct RecentAxis: Codable {
+        public var sinceFrame: Int
+        public var estimate: Estimate?
+        public var angleLimit = 12 * Double.pi / 180
+        public var distanceLimit: Double
+        /// Nil when the recent window gave no estimate.
+        public var agrees: Bool?
+        public var contradictions: Int
+        public var moved: Bool
     }
 
     public struct Estimate: Codable {

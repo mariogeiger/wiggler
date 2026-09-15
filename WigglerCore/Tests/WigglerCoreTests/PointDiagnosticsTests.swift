@@ -86,34 +86,4 @@ final class PointDiagnosticsTests: XCTestCase {
             XCTAssertEqual(evidence?.outcome, outcome)
         }
     }
-
-    func testFreshChordContradictionsExplainInvalidationAndRestart() throws {
-        let recorder = try diagnosticsRecorder()
-        let axis = Axis(origin: .zero, direction: V3(0, 1, 0))
-        let chords = (0..<8).map { _ in ChordConstraint(midpoint: V3(0.1, 0, 0), chord: V3(0, 0.1, 0), frame: 10) }
-        var observed = AxisStability()
-        var plain = AxisStability()
-        for frame in 1...3 {
-            observed.observe(frame: frame, consistent: true)
-            plain.observe(frame: frame, consistent: true)
-        }
-        for batch in 1...3 {
-            let restart = observed.observe(
-                chords: chords, axis: axis, tolerance: 0.01, required: 3, diagnostics: recorder)
-            XCTAssertEqual(restart, plain.observe(chords: chords, axis: axis, tolerance: 0.01, required: 3))
-            let evidence = try XCTUnwrap(recorder.value.chordBatch)
-            XCTAssertEqual(evidence.confirmationsBefore, batch == 1 ? 3 : 0)
-            XCTAssertEqual(evidence.confirmationsAfter, 0)
-            XCTAssertEqual(evidence.inconsistentBefore, batch - 1)
-            XCTAssertEqual(evidence.inconsistentAfter, batch)
-            XCTAssertEqual(evidence.restartRequired, batch == 3)
-            XCTAssertEqual(evidence.badCount, 8)
-            XCTAssertTrue(evidence.rejects)
-            XCTAssertEqual(evidence.residuals[0].residualMeters, 0.1)
-            XCTAssertEqual(observed.isStable(required: 3), plain.isStable(required: 3))
-        }
-        XCTAssertFalse(observed.observe(chords: [], axis: axis, tolerance: 0.01, required: 3, diagnostics: recorder))
-        XCTAssertEqual(recorder.value.chordBatch?.restartRequired, false)
-        XCTAssertEqual(recorder.value.chordBatch?.inconsistentAfter, 3)
-    }
 }

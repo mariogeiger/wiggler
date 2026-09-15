@@ -89,8 +89,9 @@ public struct AxisEstimator {
     public var newestFrame: Int { constraints.last?.frame ?? -1 }
     public var oldestFrame: Int { constraints.first?.frame ?? -1 }
 
-    public func estimate(huber: Double? = nil) -> AxisEstimate? {
-        let cs = constraints
+    /// Estimate from all constraints, or from those newer than `frame` only.
+    public func estimate(huber: Double? = nil, newerThan frame: Int = -1) -> AxisEstimate? {
+        let cs = frame < 0 ? constraints : Array(constraints.drop(while: { $0.frame <= frame }))
         let n = cs.count
         if n < 30 { return nil }
         let hub = huber ?? huberMeters

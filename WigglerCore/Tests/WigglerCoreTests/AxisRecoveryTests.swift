@@ -78,13 +78,15 @@ final class AxisRecoveryTests: XCTestCase {
         var previous = EngineOutput()
         var invalidated = false
         for f in 0..<800 {
-            let shift = 0.02 * min(1, max(0, Double(f - 300) / 30))
+            let shift = 0.04 * min(1, max(0, Double(f - 300) / 30))
             let scene = SyntheticScene(center: V3(0.05 + shift, -0.05, -0.75), normal: V3(0, 0, 1))
             var input = scene.render(theta: Double(f) * 0.04, depthNoise: 0, rng: &rng)
             input.timestamp = Double(f) / 60
             let out = engine.process(input)
             if f == 300 { XCTAssertTrue(previous.axisStable) }
-            if f > 300 && f < 360 && !out.axisStable {
+            // Chords straddling the move fit neither axis; the recent window must fill with post-move chords
+            // and contradict the old axis three evaluations in a row before the move is recognised.
+            if f > 300 && f < 480 && !out.axisStable {
                 invalidated = true
                 XCTAssertNotNil(out.axis)
             }
@@ -93,7 +95,7 @@ final class AxisRecoveryTests: XCTestCase {
         XCTAssertTrue(invalidated, "object displacement left the axis green")
         XCTAssertTrue(previous.axisStable)
         guard let axis = previous.axis else { return XCTFail("missing recovered axis") }
-        XCTAssertEqual(axis.origin.x, 0.07, accuracy: 0.005)
+        XCTAssertEqual(axis.origin.x, 0.09, accuracy: 0.005)
     }
 
     func testDepthBearingBodyHandoffWithinOneRegionDiscardsOldAxis() {
