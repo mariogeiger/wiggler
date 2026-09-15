@@ -88,9 +88,16 @@ yellow = no depth, white = new.
 
 Controls sit in two columns just below the top safe area (below the Dynamic Island on supported iPhones).
 The left column has harmonic-order buttons, harmonic-input buttons, then point-count buttons on three rows.
-The right column has Record, with elapsed seconds while recording. One line below shows angle, rpm, and harmonic
-progress while accumulating; it stays blank when no measurement is available. Controls keep their
-intrinsic sizes; outer margins give way when the controls need the width. The camera and AR overlays remain full-screen.
+The right column has Record, with elapsed seconds while recording. Below it, two small dials replace numeric
+angle and rpm readouts: orange for the angle (one turn, zero at noon), cyan for speed (a white noon mark is zero).
+Positive rpm moves clockwise and negative rpm counterclockwise; ±100 rpm is six o'clock. Speed saturates there
+beyond ±100 rpm rather than wrapping back to zero. The faces have no text; VoiceOver retains numeric readings.
+Harmonic progress appears beside the dials while accumulating. Measurements stay hidden until the angle is
+available. Controls and dials keep their intrinsic sizes; outer margins give way when they need the width.
+The camera and AR overlays remain full-screen.
+
+`./tools/test-dials` checks the dial scales, app Swift syntax, and checked-in Xcode source membership on Linux
+with Docker and `memcap`. It does not replace an iOS build or a visual check on the phone.
 
 The harmonic input buttons, below the harmonic-order row, select **Y** (luma / brightness, the default),
 **Cr** (red chroma, red relative to luminance), **Cb** (blue chroma, blue relative to luminance),

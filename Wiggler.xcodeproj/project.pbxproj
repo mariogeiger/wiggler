@@ -19,6 +19,8 @@
 		A100000000000000000000AA /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000FA /* Assets.xcassets */; };
 		A100000000000000000000A6 /* WigglerCore in Frameworks */ = {isa = PBXBuildFile; productRef = A100000000000000000000D1 /* WigglerCore */; };
 		A100000000000000000000AE /* libz.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = A100000000000000000000FE /* libz.tbd */; };
+		A20000000000000000000011 /* RotationDial.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000011 /* RotationDial.swift */; };
+		A20000000000000000000012 /* RotationDialScale.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000012 /* RotationDialScale.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -35,6 +37,8 @@
 		A100000000000000000000F7 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A100000000000000000000FA /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A100000000000000000000FE /* libz.tbd */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.text-based-dylib-definition; name = libz.tbd; path = usr/lib/libz.tbd; sourceTree = SDKROOT; };
+		A30000000000000000000011 /* RotationDial.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RotationDial.swift; sourceTree = "<group>"; };
+		A30000000000000000000012 /* RotationDialScale.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RotationDialScale.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -65,6 +69,8 @@
 			children = (
 				A100000000000000000000F1 /* WigglerApp.swift */,
 				A100000000000000000000F2 /* ContentView.swift */,
+				A30000000000000000000012 /* RotationDialScale.swift */,
+				A30000000000000000000011 /* RotationDial.swift */,
 				A100000000000000000000F3 /* ARSessionController.swift */,
 				A100000000000000000000F4 /* AxisOverlayNode.swift */,
 				A100000000000000000000F8 /* HarmonicOverlayNode.swift */,
@@ -170,6 +176,8 @@
 			files = (
 				A100000000000000000000A1 /* WigglerApp.swift in Sources */,
 				A100000000000000000000A2 /* ContentView.swift in Sources */,
+				A20000000000000000000012 /* RotationDialScale.swift in Sources */,
+				A20000000000000000000011 /* RotationDial.swift in Sources */,
 				A100000000000000000000A3 /* ARSessionController.swift in Sources */,
 				A100000000000000000000A4 /* AxisOverlayNode.swift in Sources */,
 				A100000000000000000000A8 /* HarmonicOverlayNode.swift in Sources */,

@@ -50,9 +50,9 @@ struct ContentView: View {
                 }
                 GridRow {
                     harmonicSignalControl.fixedSize()
-                    measurementLine
+                    measurementDials
+                        .fixedSize()
                         .frame(maxWidth: .infinity, alignment: .trailing)
-                        .gridCellUnsizedAxes(.horizontal)
                 }
                 GridRow {
                     pointCountControl.fixedSize()
@@ -83,21 +83,21 @@ struct ContentView: View {
 
     // MARK: Readouts and controls
 
-    private var measurementLine: some View {
+    private var measurementDials: some View {
         let output = controller.output
-        var fields = [String]()
-        if output.state == .locked, output.angleConfidence > 0 {
-            fields.append(String(format: "%.0f°", output.angleDegrees))
-            fields.append(String(format: "%+.0f rpm", output.rpm))
-            if controller.harmonicOrder != nil, controller.harmonicProgress < 1 {
-                fields.append("\(Int(controller.harmonicProgress * 100)) %")
+        return HStack(spacing: 8) {
+            if output.state == .locked, output.angleConfidence > 0 {
+                RotationDial(scale: .angle, value: output.angleDegrees)
+                RotationDial(scale: .rpm, value: output.rpm)
+                if controller.harmonicOrder != nil, controller.harmonicProgress < 1 {
+                    Text("\(Int(controller.harmonicProgress * 100)) %")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.white.opacity(0.8))
+                        .lineLimit(1)
+                }
             }
         }
-        return Text(fields.isEmpty ? " " : fields.joined(separator: " · "))
-            .font(.caption.monospacedDigit())
-            .foregroundStyle(.white.opacity(0.8))
-            .lineLimit(1)
-            .accessibilityHidden(fields.isEmpty)
+        .frame(minHeight: 34)
     }
 
     private var pointCountControl: some View {

@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+root=$(cd "$(dirname "$0")/.." && pwd)
+artifacts=$(mktemp -d)
+trap 'rm -rf "$artifacts"' EXIT
+image=swift@sha256:9f82fca7d577f78772c1ef0c38392f9bee05d92c8483f903005cded067ded5ee
+memcap -h 1G -m 2G -s 0 docker run --rm --memory=1g --memory-swap=1g --cpus=2 \
+    --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$root:/src:ro" -v "$artifacts:/test" -w /src "$image" \
+    bash -lc 'set -euo pipefail
+        swiftc Wiggler/RotationDialScale.swift tools/tests/dials/main.swift -o /test/dials-test
+        /test/dials-test
+        swiftc -frontend -parse Wiggler/*.swift'
+cd "$root"
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/tests -p test_xcode_project.py
